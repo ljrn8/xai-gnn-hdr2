@@ -4,24 +4,29 @@ import torch.nn.functional as F
 from torch_geometric.nn import GCNConv
 from torch_geometric.nn import global_mean_pool
 
-class NodeGCN2(nn.Module):
-    def __init__(self, input_feat, hidden_channels, output_channels, dropout=0.5):
-        super(NodeGCN2, self).__init__()
-        self.conv1 = GCNConv(input_feat, hidden_channels)
-        self.conv2 = GCNConv(hidden_channels, output_channels)
+class NodeGCN(nn.Module):
+    def __init__(self, input_feat, num_layers, hidden_channels, output_channels, dropout=0.5):
+        super(NodeGCN, self).__init__()
         self.dropout = dropout
+        self.convs = nn.ModuleList()
+        self.convs.append(GCNConv(input_feat, hidden_channels))
+        for _ in range(num_layers - 2):
+            self.convs.append(GCNConv(hidden_channels, hidden_channels))
+        self.convs.append(GCNConv(hidden_channels, output_channels))
+
 
     def forward(self, x, edge_index):
-        x = self.conv1(x, edge_index)
-        x = x.relu()
-        x = F.dropout(x, p=self.dropout, training=self.training)
-        x = self.conv2(x, edge_index)
+        for conv in self.convs[:-1]:
+            x = conv(x, edge_index)
+            x = x.relu()
+            x = F.dropout(x, p=self.dropout, training=self.training)
+        x = self.convs[-1](x, edge_index)
         return x
     
 
-class GraphTaskNodeGCN2(NodeGCN2):
-    def __init__(self,  input_feat, hidden_channels, output_graph_channels):
-        super(GraphTaskNodeGCN2, self).__init__(input_feat, hidden_channels, hidden_channels)
+class GraphTaskNodeGCN(NodeGCN):
+    def __init__(self,  input_feat, num_gcn_layers, hidden_channels, output_graph_channels):
+        super(GraphTaskNodeGCN, self).__init__(input_feat, num_gcn_layers, hidden_channels, hidden_channels)
         self.lin = nn.Linear(hidden_channels, output_graph_channels)
 
     def forward(self, x, edge_index, batch=None):
