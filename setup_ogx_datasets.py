@@ -1,53 +1,58 @@
 """
 Assembles consistant Train/val/test split and OHE for OGX datasets
 """
+
 import os
 import sys
 import torch
-sys.path.append('../benchmarks'); import ogx_datasets_pyg
+
+sys.path.append("../benchmarks")
+import ogx_datasets_pyg
 import torch.nn.functional as F
-from loguru import logger 
+from loguru import logger
 import pickle
 import numpy as np
 
 for ds_name in [
-    'delta', 
-    'echo', 
-    'foxtrot',
-    'golf',
-    'hotel',
-    'india',
-    'juliett',
-    'november',
-    'oscar',
+    "delta",
+    "echo",
+    "foxtrot",
+    "golf",
+    "hotel",
+    "india",
+    "juliett",
+    "november",
+    "oscar",
     # NOTE: excluded due to 20x size
-    'kilo',
-    'lima',
-    'mike',
+    "kilo",
+    "lima",
+    "mike",
 ]:
-    
-    logger.info(f' Dataset name: {ds_name}')
-    ds = ogx_datasets_pyg.OGXBenchmark(root='/tmp', name=ds_name)
+
+    logger.info(f" Dataset name: {ds_name}")
+    ds = ogx_datasets_pyg.OGXBenchmark(root="/tmp", name=ds_name)
 
     x_pool = torch.cat([G.x for G in ds], dim=0)
     num_classes = int(x_pool.max().item()) + 1
 
-    print(f'statistics:')
-    print(f'num graphs: {len(ds)}')
-    print(f'x shape: {ds[0].x.shape}')
-    print(f'x example: {ds[0].x}')
-    print(f'num x classes: {num_classes}')
+    print(f"statistics:")
+    print(f"num graphs: {len(ds)}")
+    print(f"x shape: {ds[0].x.shape}")
+    print(f"x example: {ds[0].x}")
+    print(f"num x classes: {num_classes}")
 
     def OHE_graph(G):
         assert G.x.dim() == 1, "Expected node features to be 1D for OHE encoding"
-        assert int(G.x.max().item()) + 1 < 1000, "Expected at less than 1000 classes for OHE encoding"
+        assert (
+            int(G.x.max().item()) + 1 < 1000
+        ), "Expected at less than 1000 classes for OHE encoding"
         G.x = F.one_hot(G.x, num_classes=num_classes).float()
         return G
 
-    logger.info('applying OHE')
-    logger.info(f'Original graph x shape: {ds[0].x.shape}')
+    logger.info("applying OHE")
+    logger.info(f"Original graph x shape: {ds[0].x.shape}")
     graphs = [OHE_graph(G) for G in ds]
-    logger.info(f'Processed graph x shape: {graphs[0].x.shape}')
+    logger.info(f"Processed graph x shape: {graphs[0].x.shape}")
 
     # split graphs randomly into train val test 70/20/10, never touching test indexes
     num_graphs = len(graphs)
@@ -62,12 +67,12 @@ for ds_name in [
     val_graphs = [graphs[i] for i in val_indexes]
     test_graphs = [graphs[i] for i in test_indexes]
 
-    root = f'./interm/ogx/{ds_name}'
+    root = f"./interm/ogx/{ds_name}"
     os.makedirs(root, exist_ok=True)
 
-    with open(os.path.join(root, 'train_graphs.pkl'), 'wb') as f:
+    with open(os.path.join(root, "train_graphs.pkl"), "wb") as f:
         pickle.dump(train_graphs, f)
-    with open(os.path.join(root, 'val_graphs.pkl'), 'wb') as f:
+    with open(os.path.join(root, "val_graphs.pkl"), "wb") as f:
         pickle.dump(val_graphs, f)
-    with open(os.path.join(root, 'test_graphs.pkl'), 'wb') as f:
+    with open(os.path.join(root, "test_graphs.pkl"), "wb") as f:
         pickle.dump(test_graphs, f)
