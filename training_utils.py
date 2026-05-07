@@ -93,7 +93,6 @@ def openpkl(file):
         logger.info(f"file size: {sys.getsizeof(file)} bytes")
         return file
 
-
 @dataclass
 class ModelPerformance:
     roc_auc: float
@@ -102,23 +101,32 @@ class ModelPerformance:
     prec: float
     acc: float
     f1: float
-    y_pred: Optional[np.ndarray] = None
-    y_true: Optional[np.ndarray] = None
-
 
 @dataclass
 class TrainingRun:
     best_model: nn.Module
     current_model: nn.Module
-    dataset: str
+    dataset_name: str
     train_losses: list
     val_losses: list
-    node_level_task: Optional[bool] = None
+    y_pred: torch.Tensor 
+    y_true: torch.Tensor
+    criterion: nn.Module
+    transductive: Optional[bool] = None
     val_performance: Optional[ModelPerformance] = None
     hyperparameter: Optional[dict] = None
-    test_indexes: Optional[np.ndarray] = None
     epochs_trained: int = 0
 
+def evaluate_multiclass_predictions(y_true, y_scores):
+    y_pred_bin = np.argmax(y_scores, axis=1)
+    return ModelPerformance(
+        roc_auc=roc_auc_score(y_true, y_scores, multi_class="ovr"),
+        pr_auc=average_precision_score(y_true, y_scores, average="macro"),
+        rec=recall_score(y_true, y_pred_bin, average="macro"),
+        prec=precision_score(y_true, y_pred_bin, average="macro"),
+        acc=accuracy_score(y_true, y_pred_bin),
+        f1=f1_score(y_true, y_pred_bin, average="macro"),
+    )
 
 def evaluate_binary_predictions(y_true, y_scores):
     y_pred_bin = [1 if p > 0.5 else 0 for p in y_scores]
@@ -129,8 +137,6 @@ def evaluate_binary_predictions(y_true, y_scores):
         prec=precision_score(y_true, y_pred_bin),
         acc=accuracy_score(y_true, y_pred_bin),
         f1=f1_score(y_true, y_pred_bin),
-        y_pred=np.array(y_pred_bin),
-        y_true=np.array(y_true),
     )
 
 def fit_inductive_graphs(Graphs, model, criterion, optimizer):
@@ -187,40 +193,35 @@ def eval_transductive_graph(graph, model, criterion, eval_mask):
         y = graph.y.float().view(-1)[eval_mask]
         loss = criterion(logit, y)
         prob = torch.sigmoid(logit)
-        y_true = y.cpu().tolist()
-        y_scores = prob.cpu().tolist()
+        y_true = y.cpu()
+        y_scores = prob.cpu()
 
     return loss.item(), y_true, y_scores
+
 
 def train_binary_graph_task(
     model: nn.Module,
     epochs: int,
     lr: float,
+    criterion,
     graph = None,
     train_graphs: Optional[Iterable] = False,
     val_graphs: Optional[Iterable] = False,
-    patience: int = 10,
+    patience: int = 20,
     delta: float = 0.001,
     dataset_name="",
-    criterion=None,
     transductive=False
 ) -> TrainingRun:
     """Trains a binary graph classification model.
     (Graphs iterable require pyGeometric style G.y G.edge_index and G.x alone)
     """
+
     if transductive:
         assert graph, "Transductive learning requires a single graph with train_mask, val_mask and test_mask attributes"
     else:
         assert train_graphs and val_graphs, "Inductive learning requires train and val graph iterables"
 
     optimizer = optim.Adam(model.parameters(), lr=lr)
-    if not criterion:
-        # crierion is weight BCE loss to unbalanced y (y is 0 or 1 per graph btw)
-        all_labels = torch.cat([G.y.view(-1) for G in train_graphs], dim=0)
-        pos_weight = (all_labels == 0).sum() / (all_labels == 1).sum()
-        logger.info(f"Using weighted BCE loss with pos_weight: {pos_weight:.4f}")
-        criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
-
     train_losses, val_losses = [], []
     best_model = None
     best_loss = float("inf")
@@ -239,6 +240,7 @@ def train_binary_graph_task(
             val_loss, y_true, y_scores = eval_inductive_graphs(val_graphs, model, criterion)
 
         val_losses.append(val_loss)
+        train_losses.append(train_loss)
 
         # Early stopping check
         if best_loss - val_loss < delta:
@@ -263,11 +265,13 @@ def train_binary_graph_task(
     return TrainingRun(
         best_model=best_model,
         current_model=model,
-        dataset=dataset_name,
+        dataset_name=dataset_name,
         train_losses=train_losses,
         val_losses=val_losses,
-        val_performance=evaluate_binary_predictions(y_true, y_scores),
         epochs_trained=epc,
-        node_level_task=transductive
+        transductive=transductive,
+        crtierion=criterion,
+        y_true=y_true,
+        y_pred=y_scores,
     )
 

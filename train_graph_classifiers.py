@@ -1,5 +1,5 @@
-""" Optimizes a models in training_utils.MODEL_CONFIGS against each transductive/inductive binary graph classification task in the dataset folder
-usage: python train_binary_graph_task.py <root_dir>
+""" Optimizes a models in training_utils.MODEL_CONFIGS against each transductive/inductive binary/multiclass graph classification task in the dataset folder
+usage: python train_graph_classifiers.py <root_dir>
 
 folder format anticipated (inductive tasks):
 root_dir/
@@ -32,8 +32,11 @@ import sys
 import torch
 import torch.nn.functional as F
 from loguru import logger
-from models import NodeGCN, NodeGIN, GraphTaskFromNodeModel
-from training_utils import train_binary_graph_task, TrainingRun, MODEL_CONFIGS
+from models import GraphTaskFromNodeModel
+from training_utils import (
+    train_binary_graph_task, TrainingRun, MODEL_CONFIGS, 
+    evaluate_multiclass_predictions, evaluate_binary_predictions
+)
 from pprint import pprint
 import pickle
 import numpy as np
@@ -45,14 +48,18 @@ import argparse
 
 parser = argparse.ArgumentParser(description="Train GNNs on binary graph classification tasks")
 parser.add_argument('--ds-root', default=Path("interm/") / "RW graph classification")
-parser.add_argument('--transductive', action='store_true', help='Whether to train on transductive tasks instead of inductive tasks (default)' )
+parser.add_argument('--transductive-node-level', action='store_true')
+parser.add_argument('--inductive-graph-level', action='store_true')
+parser.add_argument('--multiclass', action='store_true', help='Whether to train on multiclass tasks instead of binary tasks (default)' )
 args = parser.parse_args()
+assert args.transductive_node_level != args.inductive_graph_level
 
 root_dir = Path(args.ds_root)
 for dset in os.listdir(root_dir):
     path = root_dir / dset
     logger.info(f"\n\n Dataset name: {path.name} \n")
-    if args.transductive:
+
+    if args.transductive_node_level:
         graph = openpkl(path / "graph.pkl")
         num_features = graph.x.shape[1]
         assert hasattr(graph, 'train_mask') and hasattr(graph, 'val_mask') and hasattr(graph, 'test_mask'), 'transductive learning tasks requires these attributes'
@@ -62,10 +69,14 @@ for dset in os.listdir(root_dir):
         best_run: TrainingRun = None
         num_features = train_graphs[0].x.shape[1]
         
+    criterion = torch.nn.CrossEntropyLoss() if args.multiclass else torch.nn.BCEWithLogitsLoss()
+
     for model_name, model_class, hyperparameter_candidates in MODEL_CONFIGS:
         logger.info(f" --- Training model: {model_name} ")
         for hp in hyperparameter_candidates:
-            if args.transductive:
+
+            # determine model formation based on task level
+            if args.transductive_node_level:
                 model = model_class(
                     input_feat=num_features,
                     hidden_channels=hp["hidden_channels"],
@@ -86,8 +97,9 @@ for dset in os.listdir(root_dir):
                     dropout=None,
                 )
 
+            # train model based on task type
             logger.info(f"Model: {model}")
-            if args.transductive:
+            if args.transductive_node_level:
                 run: TrainingRun = train_binary_graph_task(
                     graph=graph,
                     dataset_name=path.name,
@@ -95,7 +107,8 @@ for dset in os.listdir(root_dir):
                     epochs=hp["epochs"],
                     lr=hp["lr"],
                     patience=20,
-                    transductive=args.transductive
+                    transductive=True,
+                    criterion=criterion
                 )
             else:
                 run: TrainingRun = train_binary_graph_task(
@@ -106,10 +119,16 @@ for dset in os.listdir(root_dir):
                     epochs=hp["epochs"],
                     lr=hp["lr"],
                     patience=20,
-                    transductive=args.transductive
+                    transductive=False,
+                    criterion=criterion
                 )
 
             run.hyperparameter = hp
+
+            if args.multiclass:
+                run.val_performance = evaluate_multiclass_predictions(run.y_true, run.y_pred)
+            else:
+                run.val_performance = evaluate_binary_predictions(run.y_true, run.y_pred)
 
             # only keep the model with the best run.performance.f1
             # this ensures realistic sensativity (uncertainty, utilized by explainers) by enforcing the 0.5 threshold, unlike AUC metrics
