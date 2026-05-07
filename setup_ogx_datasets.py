@@ -18,20 +18,25 @@ for ds_name in [
     'hotel',
     'india',
     'juliett',
+    'november',
+    'oscar',
+    # NOTE: excluded due to 20x size
     'kilo',
     'lima',
     'mike',
-    'november',
-    'oscar',
 ]:
     
     logger.info(f' Dataset name: {ds_name}')
     ds = ogx_datasets_pyg.OGXBenchmark(root='/tmp', name=ds_name)
 
-    # TODO: try without OHE aswell
-
     x_pool = torch.cat([G.x for G in ds], dim=0)
     num_classes = int(x_pool.max().item()) + 1
+
+    print(f'statistics:')
+    print(f'num graphs: {len(ds)}')
+    print(f'x shape: {ds[0].x.shape}')
+    print(f'x example: {ds[0].x}')
+    print(f'num x classes: {num_classes}')
 
     def OHE_graph(G):
         assert G.x.dim() == 1, "Expected node features to be 1D for OHE encoding"

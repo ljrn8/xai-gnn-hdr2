@@ -14,6 +14,13 @@ import torch.optim as optim
 from tqdm import tqdm
 from pprint import pprint
 
+def openpkl(file):
+    logger.info(f'Opening file: {file}')
+    with open(file, 'rb') as f:
+        file = pickle.load(f)
+        logger.info(f'file size: {sys.getsizeof(file)} bytes')
+        return file
+    
 @dataclass
 class ModelPerformance:
     roc_auc: float
@@ -59,16 +66,20 @@ def train_binary_graph_task(
     epochs: int,
     lr: float,
     patience: int = 10,
-    delta: float = 0.01,
+    delta: float = 0.001,
     dataset_name="",
+    criterion=None,
 ) -> TrainingRun:
     """ Trains a binary graph classification model.
-    will shuffle and split 70/20/10, never touching run/test_indexes graphs
-    (Graphs iterable requires normal G.y G.edge_index and G.x alone)
+    (Graphs iterable require pyGeometric style G.y G.edge_index and G.x alone)
     """
-
     optimizer = optim.Adam(model.parameters(), lr=lr)
-    criterion = nn.BCEWithLogitsLoss()
+    if not criterion:
+        # crierion is weight BCE loss to unbalanced y (y is 0 or 1 per graph btw)
+        all_labels = torch.cat([G.y.view(-1) for G in train_graphs], dim=0)
+        pos_weight = (all_labels == 0).sum() / (all_labels == 1).sum()
+        logger.info(f'Using weighted BCE loss with pos_weight: {pos_weight:.4f}')
+        criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
 
     train_losses, val_losses = [], []
     best_model = None
@@ -76,13 +87,15 @@ def train_binary_graph_task(
     early_stopping_timer = 0
     best_epoch = 0
 
-    for epc in range(1, epochs + 1):
+
+    pbar = tqdm(range(1, epochs + 1), desc=f"[{dataset_name}] w/ {epochs} epochs")
+    for epc in pbar:
 
         # --- training ---
 
         model.train()
         total_loss = 0.0
-        for G in tqdm(train_graphs):
+        for G in train_graphs:
             optimizer.zero_grad()
 
             # x has a shape of 1 so add an empty feature dimension
@@ -105,7 +118,7 @@ def train_binary_graph_task(
         total_val_loss = 0.0
         y_true, y_scores = [], []
         with torch.no_grad():
-            for G in tqdm(val_graphs):
+            for G in val_graphs:
                 logit = model(G.x, G.edge_index).view(-1)
                 y = G.y.float().view(-1)
                 loss = criterion(logit, y)
@@ -118,13 +131,11 @@ def train_binary_graph_task(
         val_losses.append(avg_val_loss)
 
         # Early stopping check
-        logger.info(f'Best loss so far: {best_loss:.4f} loss currently is {avg_val_loss:.4f}')
         if  best_loss - avg_val_loss < delta:
             if early_stopping_timer >= patience:
                 logger.info(f"Early stopping at epoch {epc} with best epoch {best_epoch} and best loss {best_loss:.4f}")
                 break
             
-            logger.info(f'no improvement above delta, early stopping incremented ({early_stopping_timer + 1}/{patience})')
             early_stopping_timer += 1
         else:
             early_stopping_timer = 0
@@ -134,7 +145,9 @@ def train_binary_graph_task(
             best_model = deepcopy(model)
             best_epoch = epc
 
-        logger.info(f"[{dataset_name}] Epoch {epc}/{epochs} | train {train_losses[-1]:.4f} | val {avg_val_loss:.4f}")
+        description = f"[{dataset_name}] Epoch {epc}/{epochs} | train {train_losses[-1]:.4f} | val {avg_val_loss:.4f}"
+        pbar.set_description(description)
+
 
     return TrainingRun(
         best_model=best_model,
