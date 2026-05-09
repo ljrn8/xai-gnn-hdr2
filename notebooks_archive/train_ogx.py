@@ -4,7 +4,7 @@ import torch
 import torch.nn.functional as F
 from loguru import logger
 from models import GraphTaskNodeGCN
-from training_utils import train_binary_graph_task, TrainingRun
+from training_utils import GNN_task, TrainingRun
 from pprint import pprint
 import pickle
 import numpy as np
@@ -43,7 +43,7 @@ for dset in os.listdir(root_dir):
 
         logger.info(f"Model: {model}")
 
-        run: TrainingRun = train_binary_graph_task(
+        run: TrainingRun = GNN_task(
             train_graphs=train_graphs,
             val_graphs=val_graphs,
             dataset_name=path.name,

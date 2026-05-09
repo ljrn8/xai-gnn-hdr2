@@ -22,69 +22,6 @@ from tqdm import tqdm
 from pprint import pprint
 from models import *
 
-MODEL_CONFIGS = (
-    (
-        "GNC2",
-        NodeGCN,
-        [
-            {
-                "lr": 0.0005,
-                "epochs": 100,
-                "hidden_channels": 64,
-                "num_layers": 1,
-                "dropout": None,
-            },
-            {
-                "lr": 0.0005,
-                "epochs": 100,
-                "hidden_channels": 32,
-                "num_layers": 2,
-                "dropout": None,
-            },
-            {
-                "lr": 0.0005,
-                "epochs": 100,
-                "hidden_channels": 64,
-                "num_layers": 3,
-                "dropout": None,
-            },
-            {
-                "lr": 0.0005,
-                "epochs": 300,
-                "hidden_channels": 64,
-                "num_layers": 3,
-                "dropout": 0.5,
-            },
-            {
-                "lr": 0.0003,
-                "epochs": 400,
-                "hidden_channels": 64,
-                "num_layers": 3,
-                "dropout": 0.5,
-            },
-            {
-                "lr": 0.001,
-                "epochs": 200,
-                "hidden_channels": 64,
-                "num_layers": 3,
-                "dropout": 0.5,
-            },
-        ],
-    ),
-    (
-        "GIN",
-        NodeGIN,
-        [
-            {"lr": 0.001, "epochs": 200, "hidden_channels": 32, "num_layers": 3},
-            {"lr": 0.0005, "epochs": 200, "hidden_channels": 32, "num_layers": 2},
-            {"lr": 0.0005, "epochs": 200, "hidden_channels": 64, "num_layers": 4},
-            {"lr": 0.0005, "epochs": 500, "hidden_channels": 64, "num_layers": 5},
-            {"lr": 0.0003, "epochs": 200, "hidden_channels": 64, "num_layers": 5},
-            {"lr": 0.001, "epochs": 200, "hidden_channels": 64, "num_layers": 6},
-        ],
-    ),
-)
-
 
 def openpkl(file):
     logger.info(f"Opening file: {file}")
@@ -119,6 +56,15 @@ class TrainingRun:
 
 def evaluate_multiclass_predictions(y_true, y_scores):
     y_pred_bin = np.argmax(y_scores, axis=1)
+    
+    # what labels do not exist in y_true or y_pred_bin, but are a dimension in y_scores?
+    training_only_labels = set(y_pred_bin.cpu().numpy()) & set(y_true.cpu().numpy())
+    excess_dimension = set(range(y_scores.shape[1])) -  training_only_labels
+    y_scores = np.delete(y_scores.cpu(), list(excess_dimension), axis=1)
+
+    # reapply softmax
+    y_scores = torch.softmax(torch.tensor(y_scores), axis=1).numpy()
+
     return ModelPerformance(
         roc_auc=roc_auc_score(y_true, y_scores, multi_class="ovr"),
         pr_auc=average_precision_score(y_true, y_scores, average="macro"),
@@ -175,49 +121,36 @@ def eval_inductive_graphs(Graphs, model, criterion):
 
     return total_loss / len(Graphs), y_true, y_scores
 
-def fit_transductive_graph(graph, model, criterion, optimizer, train_mask):
+def fit_transductive_node_task(graph, model, criterion, optimizer, train_mask):
     model.train()
     optimizer.zero_grad()
     logit = model(graph.x, graph.edge_index)
-    logit = logit.view(-1)[train_mask]
-    y = graph.y.float().view(-1)[train_mask]
+    # logger.warning(f"logit shape: {logit.shape}, graph.x shape: {graph.x.shape}, graph.y shape: {graph.y.shape}, train_mask shape: {train_mask.shape}")  # Debugging line
+    logit = logit[train_mask, :]
+    y = graph.y.long()[train_mask]
     loss = criterion(logit, y)
     loss.backward()
     optimizer.step()
     return loss.item()
 
-def eval_transductive_graph(graph, model, criterion, eval_mask):
+def eval_transductive_node_task(graph, model, criterion, eval_mask):
     model.eval()
     with torch.no_grad():
-        logit = model(graph.x, graph.edge_index).view(-1)[eval_mask]
-        y = graph.y.float().view(-1)[eval_mask]
+        logit = model(graph.x, graph.edge_index)[eval_mask, :]
+        y = graph.y.long()[eval_mask]
         loss = criterion(logit, y)
-        prob = torch.sigmoid(logit)
+        prob = torch.softmax(logit, axis=1)
         y_true = y.cpu()
         y_scores = prob.cpu()
 
     return loss.item(), y_true, y_scores
 
-
-def train_binary_graph_task(
-    model: nn.Module,
-    epochs: int,
-    lr: float,
-    criterion,
-    graph = None,
-    train_graphs: Optional[Iterable] = False,
-    val_graphs: Optional[Iterable] = False,
-    patience: int = 20,
-    delta: float = 0.001,
-    dataset_name="",
-    transductive=False
-) -> TrainingRun:
-    """Trains a binary graph classification model.
-    (Graphs iterable require pyGeometric style G.y G.edge_index and G.x alone)
-    """
+def GNN_task(model: nn.Module, epochs: int, lr: float, criterion, single_graph = None, 
+             train_graphs: Optional[Iterable] = False, val_graphs: Optional[Iterable] = False, 
+             patience: int = 20, delta: float = 0.001, dataset_name="", transductive=False) -> TrainingRun:
 
     if transductive:
-        assert graph, "Transductive learning requires a single graph with train_mask, val_mask and test_mask attributes"
+        assert single_graph, "Transductive learning requires a single graph with train_mask, val_mask and test_mask attributes"
     else:
         assert train_graphs and val_graphs, "Inductive learning requires train and val graph iterables"
 
@@ -232,9 +165,8 @@ def train_binary_graph_task(
     for epc in pbar:
 
         if transductive:
-            train_loss = fit_transductive_graph(train_graphs, model, criterion, optimizer, train_mask=train_graphs.train_mask)
-            val_loss, y_true, y_scores = eval_transductive_graph(train_graphs, model, criterion, eval_mask=train_graphs.val_mask)
-            val_loss = val_loss / len(val_graphs)
+            train_loss = fit_transductive_node_task(single_graph, model, criterion, optimizer, train_mask=single_graph.train_mask)
+            val_loss, y_true, y_scores = eval_transductive_node_task(single_graph, model, criterion, eval_mask=single_graph.val_mask)
         else:
             train_loss = fit_inductive_graphs(train_graphs, model, criterion, optimizer)
             val_loss, y_true, y_scores = eval_inductive_graphs(val_graphs, model, criterion)
@@ -259,7 +191,7 @@ def train_binary_graph_task(
             best_model = deepcopy(model)
             best_epoch = epc
 
-        description = f"[{dataset_name}] Epoch {epc}/{epochs} | train {train_losses[-1]:.4f} | val {avg_val_loss:.4f}"
+        description = f"[{dataset_name}] Epoch {epc}/{epochs} | train {train_losses[-1]:.4f} | val {val_loss:.4f}"
         pbar.set_description(description)
 
     return TrainingRun(
@@ -270,7 +202,7 @@ def train_binary_graph_task(
         val_losses=val_losses,
         epochs_trained=epc,
         transductive=transductive,
-        crtierion=criterion,
+        criterion=criterion,
         y_true=y_true,
         y_pred=y_scores,
     )

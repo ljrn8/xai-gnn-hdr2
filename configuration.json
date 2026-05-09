@@ -1,0 +1,36 @@
+{
+    "model configurations": {
+        "inductive small graphs": { 
+            "GCN2": {
+                "lr": [0.0005, 0.0003, 0.001],
+                "epochs": [100, 300, 400, 200],
+                "hidden_channels": [32, 64],
+                "num_layers": [1, 2, 3],
+                "dropout": [0.0, 0.5]
+            },
+            "GIN": {
+                "lr": [0.001, 0.0005, 0.0003],
+                "epochs": [200, 500],
+                "hidden_channels": [32, 64],
+                "num_layers": [2, 3, 4, 5, 6]
+            }
+        },
+        "transductive citation datasets": {
+            "GCN2": {
+                "lr": [0.001, 0.0003],
+                "epochs": [1000],
+                "patience": [50],
+                "hidden_channels": [32, 64],
+                "num_layers": [1, 2, 3],
+                "dropout": [0.0, 0.5]
+            },
+            "GIN": {
+                "lr": [0.001, 0.0005, 0.0003],
+                "epochs": [1000],
+                "patience": [50],
+                "hidden_channels": [32, 64],
+                "num_layers": [2, 3, 4, 5, 6]
+            }
+        }
+    }
+}
