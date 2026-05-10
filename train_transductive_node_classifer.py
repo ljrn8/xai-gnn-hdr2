@@ -3,9 +3,9 @@ import sys
 import torch
 import torch.nn.functional as F
 from loguru import logger
-from models import GraphTaskFromNodeModel
-from training_utils import (
-    GNN_task, TrainingRun, MODEL_CONFIGS, 
+from models import MODEL_ID, GraphTaskFromNodeModel
+from GNN_training_utils import (
+    openpkl, TransductiveNodeClassification, train, ModelPerformance, TrainingRun,
     evaluate_multiclass_predictions, evaluate_binary_predictions
 )
 from pprint import pprint
@@ -13,43 +13,57 @@ import pickle
 import numpy as np
 from pathlib import Path
 import gc
-from training_utils import openpkl
+from notebooks_archive.training_utils import openpkl
 import sys
 import argparse
 import json
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--ds-root', default='output/transductive_node_tasks')
-parser.add_argument('--multiclass', default=True, action='store_true')
+parser.add_argument('--multiclass', default=False, action='store_true')
 parser.add_argument('--model-configurations', default="transductive citation datasets")
+parser.add_argument('--optimization-iterations', default=10, type=int, help="number of Hyperparameter random searches")
 args = parser.parse_args()
-
 model_configs = json.load(open("configuration.json"))["model configurations"][args.model_configurations]
 
 root_dir = Path(args.ds_root)
 for dset in os.listdir(root_dir):
     path = root_dir / dset
     logger.info(f"\n\n Dataset name: {path.name} \n")
-
     graph = openpkl(path / "graph.pkl")
-    best_run: TrainingRun = None
     num_features = graph.x.shape[1]
 
     # both expect logits, NOTE: CE needs argmax on y_true
     criterion = torch.nn.CrossEntropyLoss() if args.multiclass else torch.nn.BCEWithLogitsLoss()
     n_classes = len(graph.y.unique()) if args.multiclass else 1
+    for model_name, candidates in model_configs.items():
 
-    for config in model_configs:
+        best_run: TrainingRun = None
+        logger.info(f" --- Training model: {model_name} ")
 
-        logger.info(f" --- Training model: {config['model_name']} ")
-        for hp in config['hyperparameter_candidates']:
-            ...
+        for i in range(args.optimization_iterations):
 
-            # NOTE:
-            # pickup for next time
-            # match the config string the model class
-            # setup bayesion optimzation/ grid search
+            # --- HP Optimization (simple random search)
+            total_possible_combintations = np.prod([len(v) for v in candidates.values()])
+            if args.optimization_iterations > total_possible_combintations:
+                logger.warning(
+                    f"Number of optimization iterations ({args.optimization_iterations}) is greater than the total possible combinations of hyperparameters ({total_possible_combintations}). Consider reducing the number of iterations or increasing the hyperparameter search space to avoid redundant runs."
+                )
+                args.optimization_iterations = total_possible_combintations
 
+            done_iterations = set()
+            hp = {}
+            for param, values in candidates.items():
+                value = np.random.choice(values)
+                hp[param] = value
+
+            if tuple(hp.items()) in done_iterations:
+                i -= 1 ; continue
+            
+            done_iterations.add(tuple(hp.items()))
+
+             # --- Model training
+            model_class = MODEL_ID[model_name]
             model = model_class(
                     input_feat=num_features,
                     hidden_channels=hp["hidden_channels"],
@@ -58,17 +72,9 @@ for dset in os.listdir(root_dir):
                     dropout=hp.get("dropout"),
                 )
             logger.info(f'model: {model}')
-            run: TrainingRun = GNN_task(
-                single_graph=graph,
-                dataset_name=path.name,
-                model=model,
-                epochs=hp["epochs"],
-                lr=hp["lr"],
-                patience=20,
-                criterion=criterion,
-                transductive=True,
-            )
 
+            task = TransductiveNodeClassification(model, criterion, graph) 
+            run = train(task, epochs=hp["epochs"], lr=hp["lr"], dataset_name=path.name, patience=hp.get("patience", 20))
             run.hyperparameter = hp
 
             if args.multiclass:
@@ -84,7 +90,6 @@ for dset in os.listdir(root_dir):
             logger.info(
                 f"resulting F1 = {run.val_performance.f1:.4f}, ROC-AUC = {run.val_performance.roc_auc:.4f}," +
                 f"PREC = {run.val_performance.prec:.4f}, REC = {run.val_performance.rec:.4f}"
-
             )
             logger.info("HP:")
             pprint(hp)

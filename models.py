@@ -97,3 +97,10 @@ class GraphTaskFromNodeModel(nn.Module):
         x = global_mean_pool(x, batch=None)
         x = self.lin(x)
         return x
+
+
+# allows config JSON mapping
+MODEL_ID = {
+    "GCN": NodeGCN,
+    "GIN": NodeGIN,
+}

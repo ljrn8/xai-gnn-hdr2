@@ -1,9 +1,9 @@
 import argparse
 from pathlib import Path
-from training_utils import TrainingRun
+from notebooks_archive.training_utils import TrainingRun
 import os
 from loguru import logger
-from training_utils import openpkl
+from notebooks_archive.training_utils import openpkl
 from models import NodeGCN, NodeGIN, GraphTaskFromNodeModel
 
 parser = argparse.ArgumentParser(description="Train GNNs on binary graph classification tasks")
