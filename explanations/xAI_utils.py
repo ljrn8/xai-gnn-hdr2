@@ -187,7 +187,7 @@ class ProxyExplainerImpl(Explainer):
         self.reg_coefs = reg_coefs
 
     class ProxyExplainerModelWrapper(nn.Module):
-        """Converts an inductive node classification model to the required model signature and input for ProxyExplainers paper code."""
+        """Converts an inductive node classification model to the required model signature and input for ProxyExplainer's paper code."""
 
         def __init__(self, model):
             super().__init__()
@@ -213,9 +213,10 @@ class ProxyExplainerImpl(Explainer):
             return x
 
     def explain_graph_task(self, task: InductiveGraphClassification, graphs):
-        model = get_weighted_model(task.model)
-        model.eval()
+        model = get_weighted_model(task.model) if isinstance(task.model.node_model, (NodeGIN, NodeGCN)) else task.model
+
         # freeze all layers
+        model.eval()
         for param in model.parameters():
             param.requires_grad_(False)
 

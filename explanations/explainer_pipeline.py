@@ -20,7 +20,6 @@ for explainer_name, expl in [
     ("PROXYExplainer",  ProxyExplainerImpl(epochs=100, reg_coefs=[0.05, 1.0])),
 ]:
     files = os.listdir(args.ds_root)
-    # is_inductive = 'test_graphs.pkl' in files
     for dataset in files:
         path = Path(args.ds_root) / dataset
         print(f"\n\n Dataset name: {dataset} \n")
@@ -30,9 +29,7 @@ for explainer_name, expl in [
             model: openpkl(models_path / model) for model in os.listdir(models_path)
         }
         for model_name, graph_run in graph_runs.items():
-            print(
-                f" --- Explaining model: {model_name} with explainer: {explainer_name} "
-            )
+            print(f" --- Explaining model: {model_name} with explainer: {explainer_name} ")
             masks = expl.explain_graph_task(graph_run.task, test_graphs)
             explanation = Explanation(run=graph_run, edge_masks=masks)
             save_path = path / "explanations" / explainer_name
