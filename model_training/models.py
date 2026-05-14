@@ -1,9 +1,13 @@
+import sys
 import torch
 from torch import nn
 import torch.nn.functional as F
 from torch_geometric.nn import GCNConv, GINConv
 from torch_geometric.nn import global_mean_pool
 
+# add module as global import for older pickles before this code was packaged
+import model_training.models as models
+sys.modules['models'] = models
 
 class NodeGIN(nn.Module):
     def __init__(

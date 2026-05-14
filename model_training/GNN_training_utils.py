@@ -21,7 +21,11 @@ from sklearn.metrics import (
     accuracy_score,
 )
 
-from models import *
+from model_training.models import *
+
+# add module as global import for older pickles before this code was packaged
+import model_training.GNN_training_utils as gnn_utils
+sys.modules['GNN_training_utils'] = gnn_utils
 
 def openpkl(file):
     logger.info(f"Opening file: {file}")
@@ -34,16 +38,8 @@ def openpkl(file):
 # --------------
 # Task Interfaces
 
+
 class GraphTask(ABC):
-    """
-    Base class for a graph learning task. Subclass this to add new tasks
-    (e.g. inductive node classification, edge classification, graph regression).
-
-    Each subclass must implement:
-        fit()      — one training step, returns scalar loss
-        evaluate() — inference pass, returns (loss, y_true, y_scores)
-    """
-
     def __init__(self, model: nn.Module, criterion: nn.Module):
         self.model = model
         self.criterion = criterion
@@ -88,6 +84,7 @@ class TrainingRun:
 # --------------
 # Evaluation
 
+
 def evaluate_binary_predictions(y_true, y_scores) -> ModelPerformance:
     y_pred_bin = [1 if p > 0.5 else 0 for p in y_scores]
     return ModelPerformance(
@@ -120,7 +117,14 @@ def evaluate_multiclass_predictions(y_true, y_scores) -> ModelPerformance:
 
 
 class InductiveGraphClassification(GraphTask):
-    def __init__(self, model, criterion, train_graphs: Iterable, val_graphs: Iterable, test_graphs: Iterable):
+    def __init__(
+        self,
+        model,
+        criterion,
+        train_graphs: Iterable,
+        val_graphs: Iterable,
+        test_graphs: Iterable,
+    ):
         super().__init__(model, criterion)
         self.train_graphs = list(train_graphs)
         self.val_graphs = list(val_graphs)
