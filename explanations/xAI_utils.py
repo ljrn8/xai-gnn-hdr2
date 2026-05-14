@@ -9,6 +9,13 @@ from torch_geometric.data import Data
 sys.path.append("papercode/ProxyExplainer")
 from ExplanationEvaluation.explainers.ProxyExplainer import PROXYExplainer
 
+
+@dataclass
+class Explanation:
+    run: TrainingRun
+    edge_masks: Iterable[torch.Tensor] = None
+    node_masks: Iterable[torch.Tensor] = None
+
 # --------------------------------------------------------
 # Convert Pretrained Models to Edge_weight handlable copies
 

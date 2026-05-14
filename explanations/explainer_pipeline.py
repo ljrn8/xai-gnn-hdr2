@@ -9,7 +9,6 @@ from model_training.GNN_training_utils import *
 from explanations.xAI_utils import *
 from pathlib import Path
 import argparse
-from model_training.GNN_training_utils import generate_MUTAG # move this
 
 torch.autograd.set_detect_anomaly(True, check_nan=False)
 
@@ -26,11 +25,6 @@ for explainer_name, expl in [
         path = Path(args.ds_root) / dataset
         print(f"\n\n Dataset name: {dataset} \n")
         test_graphs = openpkl(path / "test_graphs.pkl")
-
-        # ! only for mutag
-        logger.info(f'generating MUTAG GT masks')
-        GT_mask_results = generate_MUTAG(test_graphs)
-
         models_path = path / "models"
         graph_runs = {
             model: openpkl(models_path / model) for model in os.listdir(models_path)
@@ -40,10 +34,9 @@ for explainer_name, expl in [
                 f" --- Explaining model: {model_name} with explainer: {explainer_name} "
             )
             masks = expl.explain_graph_task(graph_run.task, test_graphs)
-            GT_masks = GT_mask_results['edge_masks']
-
-            # sklearn clasification report between masks
-            from sklearn.metrics import classification_report
-            print("Classification report for edge masks:")
-            print(classification_report(GT_masks, masks))
+            explanation = Explanation(run=graph_run, edge_masks=masks)
+            save_path = path / "explanations" / explainer_name
+            save_path.mkdir(exist_ok=True, parents=True)
+            with open(save_path / f"{model_name}_explanation.pkl", "wb") as f:
+                pickle.dump(explanation, f)
 
