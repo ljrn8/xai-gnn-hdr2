@@ -1,4 +1,3 @@
-
 from torch_geometric.nn import MessagePassing, global_mean_pool
 from torch import nn
 import torch.functional as F
@@ -11,6 +10,7 @@ from explainability.xAI_utils import *
 # utilized original implementaion
 sys.path.append("papercode/ProxyExplainer")
 from ExplanationEvaluation.explainers.ProxyExplainer import PROXYExplainer
+
 
 class ProxyExplainerImpl(Explainer):
     def __init__(self, epochs):
@@ -43,7 +43,11 @@ class ProxyExplainerImpl(Explainer):
             return x
 
     def explain_graph_task(self, task: InductiveGraphClassification, graphs):
-        model = get_weighted_model(task.model) if isinstance(task.model.node_model, (NodeGIN, NodeGCN)) else task.model
+        model = (
+            get_weighted_model(task.model)
+            if isinstance(task.model.node_model, (NodeGIN, NodeGCN))
+            else task.model
+        )
 
         # freeze all layers
         model.eval()
@@ -55,9 +59,11 @@ class ProxyExplainerImpl(Explainer):
         edge_indexes = [g.edge_index for g in graphs]
         features = [g.x for g in graphs]
         self.explainer = PROXYExplainer(
-            wrapper, edge_indexes, features, 
-            reg_coefs=[0.05, 1.0], # default, cannot be tuple 
-            epochs=self.epochs
+            wrapper,
+            edge_indexes,
+            features,
+            reg_coefs=[0.05, 1.0],  # default, cannot be tuple
+            epochs=self.epochs,
         )
         graph_masks = []
         idxs = list(range(len(graphs)))
@@ -65,7 +71,7 @@ class ProxyExplainerImpl(Explainer):
         for i in tqdm(idxs):
             graph, expl_edge_weights = self.explainer.explain(i)
             graph_masks.append(expl_edge_weights)
-        
+
         return graph_masks
 
     def explain_node_task(self, task, graph):

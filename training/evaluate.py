@@ -17,9 +17,11 @@ import sys
 import argparse
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--ds-root", help="Root directory containing dataset to evaluate on")
-parser.add_argument('-n', '--node-level', action='store_true')
-parser.add_argument('-g', '--graph-level', action='store_true')
+parser.add_argument(
+    "--ds-root", help="Root directory containing dataset to evaluate on"
+)
+parser.add_argument("-n", "--node-level", action="store_true")
+parser.add_argument("-g", "--graph-level", action="store_true")
 
 
 args = parser.parse_args()
@@ -44,4 +46,3 @@ for model in os.listdir(path / "models"):
     logger.info(f"hyperparameters: ")
     pprint(model_run.hyperparameter)
     logger.info(f"epochs trained: {model_run.epochs_trained}")
-

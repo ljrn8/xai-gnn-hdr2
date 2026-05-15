@@ -6,10 +6,12 @@ from torch_geometric.nn import GCNConv, GINConv
 from torch_geometric.nn import global_mean_pool
 from torch_geometric.nn import MessagePassing
 
+
 class WeightedNodeGCN(nn.Module):
-    """ GCN model variant that can handle an edge_weight in forward(),
+    """GCN model variant that can handle an edge_weight in forward(),
     required for passing fractional subgraph explanations.
     """
+
     def __init__(
         self, input_feat, num_layers, hidden_channels, output_channels, dropout=None
     ):
@@ -31,7 +33,8 @@ class WeightedNodeGCN(nn.Module):
             return x
         x = self.convs[-1](x, edge_index, edge_weight=edge_weight)
         return x
-    
+
+
 class WeightedGINConv(MessagePassing):
     def __init__(self, nn, eps=0.0):
         super().__init__(aggr="add")
@@ -50,7 +53,7 @@ class WeightedGINConv(MessagePassing):
 
 
 class WeightedNodeGIN(nn.Module):
-    """ GIN model variant that can handle an edge_weight in forward(),
+    """GIN model variant that can handle an edge_weight in forward(),
     required for passing fractional subgraph explanations.
     """
 
@@ -97,6 +100,7 @@ class WeightedNodeGIN(nn.Module):
             return x
         x = self.convs[-1](x, edge_index, edge_weight=edge_weight)
         return x
+
 
 class GraphTaskFromNodeModel(nn.Module):
     def __init__(

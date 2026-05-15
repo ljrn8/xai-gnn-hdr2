@@ -6,6 +6,7 @@ from training.GNN_utils import *
 from abc import ABC, abstractmethod
 from torch_geometric.data import Data
 
+
 class Explainer(ABC):
     @abstractmethod
     def explain_node_task(self, task, graph):
@@ -15,6 +16,7 @@ class Explainer(ABC):
     def explain_graph_task(self, task, graphs):
         """Returns edge importance scores of all graphs"""
 
+
 @dataclass
 class Explanation:
     run: TrainingRun
@@ -22,9 +24,9 @@ class Explanation:
     node_masks: Iterable[torch.Tensor] = None
 
 
-
 # --------------------------------------------------------
 # Convert Pretrained Models to Edge_weight handlable copies
+
 
 class WeightedGINConv(MessagePassing):
     def __init__(self, nn, eps=0.0):
@@ -92,6 +94,7 @@ class WeightedNodeGIN(nn.Module):
         x = self.convs[-1](x, edge_index, edge_weight=edge_weight)
         return x
 
+
 class WeightedNodeGCN(nn.Module):
     def __init__(
         self, input_feat, num_layers, hidden_channels, output_channels, dropout=None
@@ -115,6 +118,7 @@ class WeightedNodeGCN(nn.Module):
         x = self.convs[-1](x, edge_index, edge_weight=edge_weight)
         return x
 
+
 def convert_node_model_state(trained_graph_model, empty_graph_model):
     for old_conv, new_conv in zip(
         trained_graph_model.node_model.convs, empty_graph_model.node_model.convs
@@ -122,24 +126,26 @@ def convert_node_model_state(trained_graph_model, empty_graph_model):
         new_conv.nn.load_state_dict(old_conv.nn.state_dict())
     return empty_graph_model
 
+
 def convert_graph_model_state(trained_graph_model, empty_graph_model):
     empty_graph_model = convert_node_model_state(trained_graph_model, empty_graph_model)
     empty_graph_model.lin.load_state_dict(trained_graph_model.lin.state_dict())
     return empty_graph_model
 
+
 def _get_weighted_GCN(graph_level_model):
     first_conv = graph_level_model.node_model.convs[0]
-    num_layers=len(graph_level_model.node_model.convs)
-    hidden_channels=first_conv.out_channels
+    num_layers = len(graph_level_model.node_model.convs)
+    hidden_channels = first_conv.out_channels
     empty_model = GraphTaskFromNodeModel(
-            node_model=WeightedNodeGCN(
-                input_feat=first_conv.in_channels,
-                num_layers=num_layers,
-                hidden_channels=hidden_channels,
-                output_channels=hidden_channels,
-            ),
-            incoming_channels=hidden_channels,
-            output_graph_channels=1,
+        node_model=WeightedNodeGCN(
+            input_feat=first_conv.in_channels,
+            num_layers=num_layers,
+            hidden_channels=hidden_channels,
+            output_channels=hidden_channels,
+        ),
+        incoming_channels=hidden_channels,
+        output_graph_channels=1,
     )
     for old_conv, new_conv in zip(
         graph_level_model.node_model.convs, empty_model.node_model.convs
@@ -148,10 +154,11 @@ def _get_weighted_GCN(graph_level_model):
     empty_model.lin.load_state_dict(graph_level_model.lin.state_dict())
     return empty_model
 
+
 def _get_weighted_GIN(graph_level_model):
     first_nn = graph_level_model.node_model.convs[0].nn[0]
     hidden_channels = first_nn.out_features
-    empty_model=GraphTaskFromNodeModel(
+    empty_model = GraphTaskFromNodeModel(
         node_model=WeightedNodeGIN(
             input_feat=first_nn.in_features,
             num_layers=len(graph_level_model.node_model.convs),
@@ -168,9 +175,9 @@ def _get_weighted_GIN(graph_level_model):
     empty_model.lin.load_state_dict(graph_level_model.lin.state_dict())
     return empty_model
 
+
 def get_weighted_model(graph_level_model):
     if isinstance(graph_level_model.node_model, NodeGIN):
         return _get_weighted_GIN(graph_level_model)
     elif isinstance(graph_level_model.node_model, NodeGCN):
         return _get_weighted_GCN(graph_level_model)
-

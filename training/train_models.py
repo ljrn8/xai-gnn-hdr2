@@ -24,12 +24,16 @@ import argparse
 import json
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--ds-root", help="Root directory containing dataset to evaluate on")
-parser.add_argument('-n', '--node-level', action='store_true')
-parser.add_argument('-g', '--graph-level', action='store_true')
-parser.add_argument("--model-configurations", 
-                    help="Key in configuration.json specifying which model configurations to use for training for HPO",
-                    required=True)
+parser.add_argument(
+    "--ds-root", help="Root directory containing dataset to evaluate on"
+)
+parser.add_argument("-n", "--node-level", action="store_true")
+parser.add_argument("-g", "--graph-level", action="store_true")
+parser.add_argument(
+    "--model-configurations",
+    help="Key in configuration.json specifying which model configurations to use for training for HPO",
+    required=True,
+)
 parser.add_argument(
     "-i",
     "--optimization-iterations",
@@ -39,7 +43,9 @@ parser.add_argument(
 )
 
 args = parser.parse_args()
-assert args.graph_level != args.node_level, "Please specify exactly one of --graph-level or --node-level"
+assert (
+    args.graph_level != args.node_level
+), "Please specify exactly one of --graph-level or --node-level"
 model_configs = json.load(open("configuration.json"))["model configurations"][
     args.model_configurations
 ]
@@ -61,9 +67,7 @@ elif args.node_level:
     n_classes = len(graph.y.unique())
     multiclass = n_classes > 2
 
-criterion = (
-    torch.nn.CrossEntropyLoss() if multiclass else torch.nn.BCEWithLogitsLoss()
-)
+criterion = torch.nn.CrossEntropyLoss() if multiclass else torch.nn.BCEWithLogitsLoss()
 
 for model_name, candidates in model_configs.items():
     best_run: TrainingRun = None
@@ -72,9 +76,7 @@ for model_name, candidates in model_configs.items():
     for i in range(args.optimization_iterations):
 
         #  HP Optimization (simple random search)
-        total_possible_combintations = np.prod(
-            [len(v) for v in candidates.values()]
-        )
+        total_possible_combintations = np.prod([len(v) for v in candidates.values()])
         if args.optimization_iterations > total_possible_combintations:
             logger.warning(
                 f"Number of optimization iterations ({args.optimization_iterations}) is greater than the total possible combinations of hyperparameters ({total_possible_combintations}). Consider reducing the number of iterations or increasing the hyperparameter search space to avoid redundant runs."
@@ -131,15 +133,13 @@ for model_name, candidates in model_configs.items():
             patience=hp.get("patience", 20),
         )
         run.hyperparameter = hp
-        
+
         if multiclass:
             run.val_performance = evaluate_multiclass_predictions(
                 run.y_true, run.y_pred
             )
         else:
-            run.val_performance = evaluate_binary_predictions(
-                run.y_true, run.y_pred
-            )
+            run.val_performance = evaluate_binary_predictions(run.y_true, run.y_pred)
 
         # only keep the model with the best run.performance.f1
         # this ensures realistic sensativity (uncertainty, utilized by explainers) by enforcing the 0.5 threshold, unlike AUC metrics

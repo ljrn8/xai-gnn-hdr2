@@ -32,6 +32,7 @@ EPS = 1e-6
 # The adapter below bridges that gap without touching the original model classes.
 # ---------------------------------------------------------------------------
 
+
 class _ModelAdapter(nn.Module):
     """
     Wraps WeightedNodeGCN / WeightedNodeGIN so ORExplainer can call
@@ -90,6 +91,7 @@ class _ModelAdapter(nn.Module):
 # Core explainer logic  (ORExplainer, self-contained)
 # ---------------------------------------------------------------------------
 
+
 class _ORExplainerCore(nn.Module):
     """
     Stripped-down ORExplainer that works with _ModelAdapter.
@@ -141,10 +143,12 @@ class _ORExplainerCore(nn.Module):
         embed_dim = x_dim + hidden * num_hops
         in_channels = embed_dim * 3
 
-        self.elayers = nn.ModuleList([
-            nn.Sequential(nn.Linear(in_channels, 64), nn.ReLU()),
-            nn.Linear(64, 1),
-        ])
+        self.elayers = nn.ModuleList(
+            [
+                nn.Sequential(nn.Linear(in_channels, 64), nn.ReLU()),
+                nn.Linear(64, 1),
+            ]
+        )
         self.elayers.to(self.device)
 
     # ------------------------------------------------------------------ #
@@ -172,7 +176,9 @@ class _ORExplainerCore(nn.Module):
         sub_edge_index = edge_index[:, edge_mask]
 
         # relabel
-        relabel = torch.full((num_nodes,), -1, dtype=torch.long, device=edge_index.device)
+        relabel = torch.full(
+            (num_nodes,), -1, dtype=torch.long, device=edge_index.device
+        )
         relabel[subset] = torch.arange(subset.size(0), device=edge_index.device)
         sub_edge_index = relabel[sub_edge_index]
 
@@ -191,8 +197,9 @@ class _ORExplainerCore(nn.Module):
         deg_inv = deg.pow(-1.0)
         deg_inv[deg_inv == float("inf")] = 0
         norm = edge_mask * deg_inv[col]
-        adj = SparseTensor(row=col, col=row, value=norm,
-                           sparse_sizes=(num_nodes, num_nodes))
+        adj = SparseTensor(
+            row=col, col=row, value=norm, sparse_sizes=(num_nodes, num_nodes)
+        )
         e = energy.view(-1, 1)
         for _ in range(self.num_hops):
             e = self.lamda * e + (1 - self.lamda) * (adj @ e)
@@ -230,7 +237,9 @@ class _ORExplainerCore(nn.Module):
         embed = embed.to(self.device)
         edge_index = edge_index.to(self.device)
         col, row = edge_index
-        h = torch.cat([embed[col], embed[row], embed[node_id].expand(col.size(0), -1)], dim=-1)
+        h = torch.cat(
+            [embed[col], embed[row], embed[node_id].expand(col.size(0), -1)], dim=-1
+        )
         for layer in self.elayers:
             h = layer(h)
         return self._concrete_sample(h.reshape(-1), beta=tmp, training=training)
@@ -275,8 +284,12 @@ class _ORExplainerCore(nn.Module):
                 pred = logits.argmax(dim=-1)[local_idx]
                 full_embed = torch.cat([sub_x] + hiddens, dim=-1)
                 cache[nid] = dict(
-                    subset=subset, sub_ei=sub_ei, sub_x=sub_x,
-                    full_embed=full_embed, local_idx=local_idx, pred=pred
+                    subset=subset,
+                    sub_ei=sub_ei,
+                    sub_x=sub_x,
+                    full_embed=full_embed,
+                    local_idx=local_idx,
+                    pred=pred,
                 )
 
         optimizer = Adam(self.elayers.parameters(), lr=self.lr, weight_decay=5e-4)
@@ -284,7 +297,9 @@ class _ORExplainerCore(nn.Module):
         for epoch in range(self.epochs):
             self.elayers.train()
             optimizer.zero_grad()
-            tmp = float(self.t0 * np.power(self.t1 / self.t0, epoch / max(self.epochs - 1, 1)))
+            tmp = float(
+                self.t0 * np.power(self.t1 / self.t0, epoch / max(self.epochs - 1, 1))
+            )
             total_loss = 0.0
 
             for nid, c in cache.items():
@@ -292,18 +307,25 @@ class _ORExplainerCore(nn.Module):
                 sub_x = c["sub_x"].to(self.device)
                 full_embed = c["full_embed"].to(self.device)
 
-                edge_mask = self.forward(sub_x, full_embed, sub_ei, c["local_idx"], tmp, training=True)
-                sub_ei_und, edge_mask_und = to_undirected(sub_ei, edge_attr=edge_mask,
-                                                           num_nodes=sub_x.size(0), reduce="mean")
+                edge_mask = self.forward(
+                    sub_x, full_embed, sub_ei, c["local_idx"], tmp, training=True
+                )
+                sub_ei_und, edge_mask_und = to_undirected(
+                    sub_ei, edge_attr=edge_mask, num_nodes=sub_x.size(0), reduce="mean"
+                )
 
-                pred_data = Data(x=sub_x, edge_index=sub_ei_und, edge_weight=edge_mask_und).to(self.device)
+                pred_data = Data(
+                    x=sub_x, edge_index=sub_ei_und, edge_weight=edge_mask_und
+                ).to(self.device)
                 logits = self.model(pred_data)
 
                 loss, _ = self._loss(logits[c["local_idx"]], c["pred"], edge_mask_und)
 
                 if self.gamma > 0:
                     sub_energy = energy[c["subset"]].to(self.device)
-                    prop = self._propagate_energy(sub_energy, sub_ei_und, edge_mask_und, sub_x.size(0))
+                    prop = self._propagate_energy(
+                        sub_energy, sub_ei_und, edge_mask_und, sub_x.size(0)
+                    )
                     loss = loss + self.gamma * prop[c["local_idx"]]
 
                 loss.backward()
@@ -316,7 +338,9 @@ class _ORExplainerCore(nn.Module):
     def explain_node(self, x, edge_index, node_idx):
         """Returns edge_mask over edge_index for the given node."""
         num_nodes = x.size(0)
-        subset, sub_ei, orig_edge_mask = self._k_hop_subgraph(node_idx, edge_index, num_nodes)
+        subset, sub_ei, orig_edge_mask = self._k_hop_subgraph(
+            node_idx, edge_index, num_nodes
+        )
         if sub_ei.size(1) == 0:
             return torch.zeros(edge_index.size(1))
 
@@ -326,7 +350,9 @@ class _ORExplainerCore(nn.Module):
         full_embed = torch.cat([sub_x] + hiddens, dim=-1)
 
         self.elayers.eval()
-        edge_mask = self.forward(sub_x, full_embed, sub_ei, local_idx, tmp=1.0, training=False)
+        edge_mask = self.forward(
+            sub_x, full_embed, sub_ei, local_idx, tmp=1.0, training=False
+        )
 
         # Map back to full edge_index space (unselected edges get score 0)
         full_mask = torch.zeros(edge_index.size(1), device=self.device)
@@ -337,6 +363,7 @@ class _ORExplainerCore(nn.Module):
 # ---------------------------------------------------------------------------
 # Public class
 # ---------------------------------------------------------------------------
+
 
 class ORExplainer(Explainer):
     """
@@ -456,7 +483,7 @@ class ORExplainer(Explainer):
         # Use train-mask nodes to train the explainer MLP
         train_indices = graph.train_mask.nonzero(as_tuple=True)[0].tolist()
         if self.node_sample_size > 0:
-            train_indices = train_indices[:self.node_sample_size]
+            train_indices = train_indices[: self.node_sample_size]
 
         core.train_on_graph(x, edge_index, y, train_indices)
 
@@ -530,7 +557,7 @@ class ORExplainer(Explainer):
             all_x.append(gx)
             all_ei.append(gei)
             all_y.append(gy)
-            node_indices.append(offset)   # explain node 0 of each graph
+            node_indices.append(offset)  # explain node 0 of each graph
             offset += gx.size(0)
 
         merged_x = torch.cat(all_x, dim=0)
@@ -538,7 +565,7 @@ class ORExplainer(Explainer):
         merged_y = torch.cat(all_y, dim=0)
 
         if self.node_sample_size > 0:
-            node_indices = node_indices[:self.node_sample_size]
+            node_indices = node_indices[: self.node_sample_size]
 
         core.train_on_graph(merged_x, merged_ei, merged_y, node_indices)
 
@@ -559,10 +586,13 @@ class ORExplainer(Explainer):
             vnode_idx = n
             v_src = torch.arange(n, device=device)
             v_dst = torch.full((n,), vnode_idx, device=device)
-            virtual_ei = torch.stack([
-                torch.cat([v_src, v_dst]),
-                torch.cat([v_dst, v_src]),
-            ], dim=0)
+            virtual_ei = torch.stack(
+                [
+                    torch.cat([v_src, v_dst]),
+                    torch.cat([v_dst, v_src]),
+                ],
+                dim=0,
+            )
             aug_x = torch.cat([gx, gx.mean(0, keepdim=True)], dim=0)
             aug_ei = torch.cat([gei, virtual_ei], dim=1)
 
@@ -570,7 +600,7 @@ class ORExplainer(Explainer):
             mask = core.explain_node(aug_x, aug_ei, vnode_idx)
 
             # strip virtual edges (last 2*n entries) and return original-graph scores
-            orig_mask = mask[:gei.size(1)]
+            orig_mask = mask[: gei.size(1)]
             explanations.append(orig_mask.cpu())
 
         return explanations

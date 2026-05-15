@@ -23,6 +23,7 @@ from sklearn.metrics import (
 
 from training.models import *
 
+
 def openpkl(file):
     logger.info(f"Opening file: {file}")
     with open(file, "rb") as f:
@@ -30,16 +31,19 @@ def openpkl(file):
         logger.info(f"file size: {sys.getsizeof(data)} bytes")
         return data
 
+
 # --------------
 # Task Interfaces
+
 
 class GNN(ABC, nn.Module):
     @abstractmethod
     def forward(self, x, edge_index, return_all_embeddings=False, edge_weight=None):
         """Returns node-level logits"""
 
-    # TODO: add this 
+    # TODO: add this
     # enforce things like .lin?
+
 
 class GraphTask(ABC):
     def __init__(self, model: nn.Module, criterion: nn.Module):
