@@ -24,11 +24,14 @@ import argparse
 import json
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--ds-root", description="Root directory containing dataset to evaluate on")
+parser.add_argument("--ds-root", help="Root directory containing dataset to evaluate on")
 parser.add_argument('-n', '--node-level', action='store_true')
 parser.add_argument('-g', '--graph-level', action='store_true')
-parser.add_argument("--model-configurations", description="Key in configuration.json specifying which model configurations to use for training for HPO")
+parser.add_argument("--model-configurations", 
+                    help="Key in configuration.json specifying which model configurations to use for training for HPO",
+                    required=True)
 parser.add_argument(
+    "-i",
     "--optimization-iterations",
     default=10,
     type=int,
@@ -127,7 +130,8 @@ for model_name, candidates in model_configs.items():
             dataset_name=path.name,
             patience=hp.get("patience", 20),
         )
-
+        run.hyperparameter = hp
+        
         if multiclass:
             run.val_performance = evaluate_multiclass_predictions(
                 run.y_true, run.y_pred

@@ -33,6 +33,13 @@ def openpkl(file):
 # --------------
 # Task Interfaces
 
+class GNN(ABC, nn.Module):
+    @abstractmethod
+    def forward(self, x, edge_index, return_all_embeddings=False, edge_weight=None):
+        """Returns node-level logits"""
+
+    # TODO: add this 
+    # enforce things like .lin?
 
 class GraphTask(ABC):
     def __init__(self, model: nn.Module, criterion: nn.Module):
