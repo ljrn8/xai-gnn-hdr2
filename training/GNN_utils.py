@@ -21,11 +21,7 @@ from sklearn.metrics import (
     accuracy_score,
 )
 
-from model_training.models import *
-
-# add module as global import for older pickles before this code was packaged
-import model_training.GNN_training_utils as gnn_utils
-sys.modules['GNN_training_utils'] = gnn_utils
+from training.models import *
 
 def openpkl(file):
     logger.info(f"Opening file: {file}")
@@ -33,7 +29,6 @@ def openpkl(file):
         data = pickle.load(f)
         logger.info(f"file size: {sys.getsizeof(data)} bytes")
         return data
-
 
 # --------------
 # Task Interfaces

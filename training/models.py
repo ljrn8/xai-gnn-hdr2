@@ -6,86 +6,10 @@ from torch_geometric.nn import GCNConv, GINConv
 from torch_geometric.nn import global_mean_pool
 from torch_geometric.nn import MessagePassing
 
-# add module as global import for older pickles before this code was packaged
-import model_training.models as models
-sys.modules['models'] = models
-
-class NodeGCN(nn.Module):
-    def __init__(
-        self, input_feat, num_layers, hidden_channels, output_channels, dropout=None
-    ):
-        super(NodeGCN, self).__init__()
-        self.dropout = dropout
-        self.convs = nn.ModuleList()
-        self.convs.append(GCNConv(input_feat, hidden_channels))
-        for _ in range(num_layers - 2):
-            self.convs.append(GCNConv(hidden_channels, hidden_channels))
-        self.convs.append(GCNConv(hidden_channels, output_channels))
-
-    def forward(self, x, edge_index, return_embeds=False):
-        for conv in self.convs[:-1]:
-            x = conv(x, edge_index)
-            x = x.relu()
-            if self.dropout:
-                x = F.dropout(x, p=self.dropout, training=self.training)
-        if return_embeds:
-            return x
-        x = self.convs[-1](x, edge_index)
-        return x
-    
-class NodeGIN(nn.Module):
-    """ NOTE: do not use, unweighted """
-    def __init__(
-        self, input_feat, num_layers, hidden_channels, output_channels, dropout=None
-    ):
-        super(NodeGIN, self).__init__()
-        self.dropout = dropout
-        self.convs = nn.ModuleList()
-        self.convs.append(
-            GINConv(
-                nn.Sequential(
-                    nn.Linear(input_feat, hidden_channels),
-                    nn.ReLU(),
-                    nn.Linear(hidden_channels, hidden_channels),
-                )
-            )
-        )
-        for _ in range(num_layers - 2):
-            self.convs.append(
-                GINConv(
-                    nn.Sequential(
-                        nn.Linear(hidden_channels, hidden_channels),
-                        nn.ReLU(),
-                        nn.Linear(hidden_channels, hidden_channels),
-                    )
-                )
-            )
-        self.convs.append(
-            GINConv(
-                nn.Sequential(
-                    nn.Linear(hidden_channels, output_channels),
-                    # no activation here
-                )
-            )
-        )
-
-    def forward(self, x, edge_index, return_embeds=False):
-        for conv in self.convs[:-1]:
-            x = conv(x, edge_index)
-            x = x.relu()
-            if self.dropout:
-                x = F.dropout(x, p=self.dropout, training=self.training)
-        if return_embeds:
-            return x
-        x = self.convs[-1](x, edge_index)
-        return x
-
-
-# ---------------------------------------------
-# Weighted Vairiants
-# TODO: replace the above classes
-
 class WeightedNodeGCN(nn.Module):
+    """ GCN model variant that can handle an edge_weight in forward(),
+    required for passing fractional subgraph explanations.
+    """
     def __init__(
         self, input_feat, num_layers, hidden_channels, output_channels, dropout=None
     ):
@@ -126,7 +50,7 @@ class WeightedGINConv(MessagePassing):
 
 
 class WeightedNodeGIN(nn.Module):
-    """GIN model variant that can handle an edge_weight in forward(),
+    """ GIN model variant that can handle an edge_weight in forward(),
     required for passing fractional subgraph explanations.
     """
 
@@ -197,7 +121,7 @@ class GraphTaskFromNodeModel(nn.Module):
         return x
 
 
-# allows config JSON mapping
+# for config JSON mapping
 MODEL_ID = {
     "GCN": WeightedNodeGCN,
     "GIN": WeightedNodeGIN,
