@@ -4,5 +4,11 @@ __pycache__
 interm
 raw
 archive
+
+!papercode/
 papercode/*
-!papercode/MixupExplainer/MixupExplainer/ExplanationEvaluation
+!papercode/MixupExplainer/
+papercode/MixupExplainer/*
+!papercode/MixupExplainer/MixupExplainer/
+papercode/MixupExplainer/MixupExplainer/*
+!papercode/MixupExplainer/MixupExplainer/ExplanationEvaluation/
