@@ -1,0 +1,358 @@
+ * Eval for node-level models 
+ * Evaluating dataset: output/node_level/Citeseer 
+WeightedNodeGCN(
+  (convs): ModuleList(
+    (0): GCNConv(3703, 64)
+    (1): GCNConv(64, 6)
+  )
+)
+ModelPerformance(roc_auc=0.9333336127187927,
+                 pr_auc=0.8143595577070369,
+                 rec=0.7571988795518207,
+                 prec=0.7760161787365176,
+                 acc=0.7878787878787878,
+                 f1=0.761561560926552)
+{'dropout': np.float64(0.5),
+ 'epochs': np.int64(1000),
+ 'hidden_channels': np.int64(64),
+ 'lr': np.float64(0.001),
+ 'num_layers': np.int64(2),
+ 'patience': np.int64(200)}
+WeightedNodeGIN(
+  (convs): ModuleList(
+    (0-1): 2 x WeightedGINConv()
+  )
+)
+ModelPerformance(roc_auc=0.9170939106429616,
+                 pr_auc=0.7844162044514384,
+                 rec=0.7748724105026625,
+                 prec=0.785149959785605,
+                 acc=0.7916666666666666,
+                 f1=0.7742503983063693)
+{'epochs': np.int64(1000),
+ 'hidden_channels': np.int64(32),
+ 'lr': np.float64(0.001),
+ 'num_layers': np.int64(2),
+ 'patience': np.int64(200)}
+ * Evaluating dataset: output/node_level/Cora 
+WeightedNodeGCN(
+  (convs): ModuleList(
+    (0): GCNConv(1433, 32)
+    (1): GCNConv(32, 7)
+  )
+)
+ModelPerformance(roc_auc=0.9904692562711888,
+                 pr_auc=0.9651492142615653,
+                 rec=0.8994046704761115,
+                 prec=0.91732139977423,
+                 acc=0.91005291005291,
+                 f1=0.9061126887185939)
+{'dropout': np.float64(0.0),
+ 'epochs': np.int64(1000),
+ 'hidden_channels': np.int64(32),
+ 'lr': np.float64(0.001),
+ 'num_layers': np.int64(2),
+ 'patience': np.int64(200)}
+WeightedNodeGIN(
+  (convs): ModuleList(
+    (0-5): 6 x WeightedGINConv()
+  )
+)
+ModelPerformance(roc_auc=0.9679857951121993,
+                 pr_auc=0.9221230661795285,
+                 rec=0.8584190709709345,
+                 prec=0.8931990253161063,
+                 acc=0.8835978835978836,
+                 f1=0.8726309690337644)
+{'epochs': np.int64(1000),
+ 'hidden_channels': np.int64(32),
+ 'lr': np.float64(0.001),
+ 'num_layers': np.int64(6),
+ 'patience': np.int64(200)}
+ * Eval for graph-level models 
+ * Evaluating dataset: output/graph_level/delta 
+GraphTaskFromNodeModel(
+  (node_model): WeightedNodeGCN(
+    (convs): ModuleList(
+      (0): GCNConv(34, 64)
+      (1-2): 2 x GCNConv(64, 64)
+    )
+  )
+  (lin): Linear(in_features=64, out_features=1, bias=True)
+)
+ModelPerformance(roc_auc=0.9782082324455205,
+                 pr_auc=0.9785239290817108,
+                 rec=0.9591836734693877,
+                 prec=0.8867924528301887,
+                 acc=0.9259259259259259,
+                 f1=0.9215686274509803)
+{'dropout': np.float64(0.0),
+ 'epochs': np.int64(300),
+ 'hidden_channels': np.int64(64),
+ 'lr': np.float64(0.001),
+ 'num_layers': np.int64(3)}
+GraphTaskFromNodeModel(
+  (node_model): WeightedNodeGIN(
+    (convs): ModuleList(
+      (0-5): 6 x WeightedGINConv()
+    )
+  )
+  (lin): Linear(in_features=32, out_features=1, bias=True)
+)
+ModelPerformance(roc_auc=1.0, pr_auc=1.0, rec=1.0, prec=1.0, acc=1.0, f1=1.0)
+{'epochs': np.int64(500),
+ 'hidden_channels': np.int64(32),
+ 'lr': np.float64(0.0005),
+ 'num_layers': np.int64(6)}
+ * Evaluating dataset: output/graph_level/echo 
+GraphTaskFromNodeModel(
+  (node_model): WeightedNodeGCN(
+    (convs): ModuleList(
+      (0): GCNConv(37, 32)
+      (1-2): 2 x GCNConv(32, 32)
+    )
+  )
+  (lin): Linear(in_features=32, out_features=1, bias=True)
+)
+ModelPerformance(roc_auc=0.975632043862321,
+                 pr_auc=0.987488865216624,
+                 rec=0.9402985074626866,
+                 prec=0.984375,
+                 acc=0.9568965517241379,
+                 f1=0.9618320610687023)
+{'dropout': np.float64(0.5),
+ 'epochs': np.int64(300),
+ 'hidden_channels': np.int64(32),
+ 'lr': np.float64(0.0003),
+ 'num_layers': np.int64(3)}
+GraphTaskFromNodeModel(
+  (node_model): WeightedNodeGIN(
+    (convs): ModuleList(
+      (0-4): 5 x WeightedGINConv()
+    )
+  )
+  (lin): Linear(in_features=32, out_features=1, bias=True)
+)
+ModelPerformance(roc_auc=1.0, pr_auc=1.0, rec=1.0, prec=1.0, acc=1.0, f1=1.0)
+{'epochs': np.int64(500),
+ 'hidden_channels': np.int64(32),
+ 'lr': np.float64(0.0005),
+ 'num_layers': np.int64(5)}
+ * Evaluating dataset: output/graph_level/foxtrot 
+GraphTaskFromNodeModel(
+  (node_model): WeightedNodeGCN(
+    (convs): ModuleList(
+      (0): GCNConv(38, 64)
+      (1): GCNConv(64, 64)
+    )
+  )
+  (lin): Linear(in_features=64, out_features=1, bias=True)
+)
+ModelPerformance(roc_auc=0.9366672288750211,
+                 pr_auc=0.9212589630672682,
+                 rec=0.9081632653061225,
+                 prec=0.8476190476190476,
+                 acc=0.8858447488584474,
+                 f1=0.8768472906403941)
+{'dropout': np.float64(0.5),
+ 'epochs': np.int64(400),
+ 'hidden_channels': np.int64(64),
+ 'lr': np.float64(0.001),
+ 'num_layers': np.int64(2)}
+GraphTaskFromNodeModel(
+  (node_model): WeightedNodeGIN(
+    (convs): ModuleList(
+      (0-5): 6 x WeightedGINConv()
+    )
+  )
+  (lin): Linear(in_features=32, out_features=1, bias=True)
+)
+ModelPerformance(roc_auc=1.0,
+                 pr_auc=1.0,
+                 rec=1.0,
+                 prec=0.98989898989899,
+                 acc=0.9954337899543378,
+                 f1=0.9949238578680203)
+{'epochs': np.int64(200),
+ 'hidden_channels': np.int64(32),
+ 'lr': np.float64(0.0003),
+ 'num_layers': np.int64(6)}
+ * Evaluating dataset: output/graph_level/golf 
+GraphTaskFromNodeModel(
+  (node_model): WeightedNodeGCN(
+    (convs): ModuleList(
+      (0): GCNConv(42, 32)
+      (1-2): 2 x GCNConv(32, 32)
+    )
+  )
+  (lin): Linear(in_features=32, out_features=1, bias=True)
+)
+ModelPerformance(roc_auc=0.9087184739469979,
+                 pr_auc=0.9495339510265978,
+                 rec=0.8691588785046729,
+                 prec=0.9489795918367347,
+                 acc=0.8944444444444445,
+                 f1=0.9073170731707317)
+{'dropout': np.float64(0.0),
+ 'epochs': np.int64(100),
+ 'hidden_channels': np.int64(32),
+ 'lr': np.float64(0.001),
+ 'num_layers': np.int64(3)}
+GraphTaskFromNodeModel(
+  (node_model): WeightedNodeGIN(
+    (convs): ModuleList(
+      (0-4): 5 x WeightedGINConv()
+    )
+  )
+  (lin): Linear(in_features=32, out_features=1, bias=True)
+)
+ModelPerformance(roc_auc=0.9941108692869031,
+                 pr_auc=0.9967277977273515,
+                 rec=0.9719626168224299,
+                 prec=1.0,
+                 acc=0.9833333333333333,
+                 f1=0.985781990521327)
+{'epochs': np.int64(500),
+ 'hidden_channels': np.int64(32),
+ 'lr': np.float64(0.0003),
+ 'num_layers': np.int64(5)}
+ * Evaluating dataset: output/graph_level/hotel 
+GraphTaskFromNodeModel(
+  (node_model): WeightedNodeGCN(
+    (convs): ModuleList(
+      (0): GCNConv(30, 64)
+      (1): GCNConv(64, 64)
+    )
+  )
+  (lin): Linear(in_features=64, out_features=1, bias=True)
+)
+ModelPerformance(roc_auc=0.9539728682170542,
+                 pr_auc=0.9583472290421929,
+                 rec=0.9069767441860465,
+                 prec=0.8863636363636364,
+                 acc=0.9010989010989011,
+                 f1=0.896551724137931)
+{'dropout': np.float64(0.5),
+ 'epochs': np.int64(200),
+ 'hidden_channels': np.int64(64),
+ 'lr': np.float64(0.0005),
+ 'num_layers': np.int64(1)}
+GraphTaskFromNodeModel(
+  (node_model): WeightedNodeGIN(
+    (convs): ModuleList(
+      (0-3): 4 x WeightedGINConv()
+    )
+  )
+  (lin): Linear(in_features=32, out_features=1, bias=True)
+)
+ModelPerformance(roc_auc=1.0, pr_auc=1.0, rec=1.0, prec=1.0, acc=1.0, f1=1.0)
+{'epochs': np.int64(500),
+ 'hidden_channels': np.int64(32),
+ 'lr': np.float64(0.0005),
+ 'num_layers': np.int64(4)}
+ * Evaluating dataset: output/graph_level/india 
+GraphTaskFromNodeModel(
+  (node_model): WeightedNodeGCN(
+    (convs): ModuleList(
+      (0-2): 3 x GCNConv(32, 32)
+    )
+  )
+  (lin): Linear(in_features=32, out_features=1, bias=True)
+)
+ModelPerformance(roc_auc=0.9070184426229507,
+                 pr_auc=0.925157947343822,
+                 rec=0.8032786885245902,
+                 prec=0.875,
+                 acc=0.848,
+                 f1=0.8376068376068376)
+{'dropout': np.float64(0.0),
+ 'epochs': np.int64(300),
+ 'hidden_channels': np.int64(32),
+ 'lr': np.float64(0.0003),
+ 'num_layers': np.int64(3)}
+GraphTaskFromNodeModel(
+  (node_model): WeightedNodeGIN(
+    (convs): ModuleList(
+      (0-5): 6 x WeightedGINConv()
+    )
+  )
+  (lin): Linear(in_features=64, out_features=1, bias=True)
+)
+ModelPerformance(roc_auc=1.0, pr_auc=1.0, rec=1.0, prec=1.0, acc=1.0, f1=1.0)
+{'epochs': np.int64(500),
+ 'hidden_channels': np.int64(64),
+ 'lr': np.float64(0.0005),
+ 'num_layers': np.int64(6)}
+ * Evaluating dataset: output/graph_level/juliett 
+GraphTaskFromNodeModel(
+  (node_model): WeightedNodeGCN(
+    (convs): ModuleList(
+      (0): GCNConv(30, 64)
+      (1-2): 2 x GCNConv(64, 64)
+    )
+  )
+  (lin): Linear(in_features=64, out_features=1, bias=True)
+)
+ModelPerformance(roc_auc=0.9672841939298383,
+                 pr_auc=0.9636951945968832,
+                 rec=0.9069767441860465,
+                 prec=0.8297872340425532,
+                 acc=0.8823529411764706,
+                 f1=0.8666666666666667)
+{'dropout': np.float64(0.5),
+ 'epochs': np.int64(400),
+ 'hidden_channels': np.int64(64),
+ 'lr': np.float64(0.001),
+ 'num_layers': np.int64(3)}
+GraphTaskFromNodeModel(
+  (node_model): WeightedNodeGIN(
+    (convs): ModuleList(
+      (0-4): 5 x WeightedGINConv()
+    )
+  )
+  (lin): Linear(in_features=32, out_features=1, bias=True)
+)
+ModelPerformance(roc_auc=1.0, pr_auc=1.0, rec=1.0, prec=1.0, acc=1.0, f1=1.0)
+{'epochs': np.int64(500),
+ 'hidden_channels': np.int64(32),
+ 'lr': np.float64(0.0003),
+ 'num_layers': np.int64(5)}
+ * Evaluating dataset: output/graph_level/mutag 
+GraphTaskFromNodeModel(
+  (node_model): WeightedNodeGCN(
+    (convs): ModuleList(
+      (0): GCNConv(7, 64)
+      (1): GCNConv(64, 64)
+    )
+  )
+  (lin): Linear(in_features=64, out_features=1, bias=True)
+)
+ModelPerformance(roc_auc=0.7948717948717949,
+                 pr_auc=0.9050634006516358,
+                 rec=0.9230769230769231,
+                 prec=0.8,
+                 acc=0.7894736842105263,
+                 f1=0.8571428571428571)
+{'dropout': np.float64(0.0),
+ 'epochs': np.int64(100),
+ 'hidden_channels': np.int64(64),
+ 'lr': np.float64(0.0003),
+ 'num_layers': np.int64(2)}
+GraphTaskFromNodeModel(
+  (node_model): WeightedNodeGIN(
+    (convs): ModuleList(
+      (0-4): 5 x WeightedGINConv()
+    )
+  )
+  (lin): Linear(in_features=64, out_features=1, bias=True)
+)
+ModelPerformance(roc_auc=0.9615384615384616,
+                 pr_auc=0.9821780783319243,
+                 rec=1.0,
+                 prec=0.9285714285714286,
+                 acc=0.9473684210526315,
+                 f1=0.9629629629629629)
+{'epochs': np.int64(500),
+ 'hidden_channels': np.int64(64),
+ 'lr': np.float64(0.0003),
+ 'num_layers': np.int64(5)}
