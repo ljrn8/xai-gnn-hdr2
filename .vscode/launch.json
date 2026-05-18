@@ -1,0 +1,21 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Eval xai for delta",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "explainability.evaluate",
+            "args": ["--ds-root", "output/graph_level/delta", "-gt", "ogx"],
+            "justMyCode": true
+        },
+        {
+            "name": "explain cora",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "explainability.run_explainers",
+            "args": ["--ds-root", "output/node_level/Cora", "-n"],
+            "justMyCode": true
+        }
+    ]
+}

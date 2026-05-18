@@ -13,7 +13,7 @@ from torch_geometric.utils import to_undirected
 from torch_sparse import SparseTensor
 from torch_geometric.utils import degree
 from tqdm import tqdm
-from explainability.xAI_utils import Explainer
+from explainability.explainer_utils import Explainer
 
 EPS = 1e-6
 

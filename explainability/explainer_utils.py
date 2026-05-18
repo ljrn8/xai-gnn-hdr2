@@ -20,6 +20,7 @@ class Explainer(ABC):
 @dataclass
 class Explanation:
     run: TrainingRun
+    task_type: Optional[str] = None
     edge_masks: Iterable[torch.Tensor] = None
     node_masks: Iterable[torch.Tensor] = None
 

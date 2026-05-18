@@ -5,7 +5,7 @@ import sys
 from abc import ABC, abstractmethod
 from torch_geometric.data import Data
 from training.GNN_utils import *
-from explainability.xAI_utils import *
+from explainability.explainer_utils import Explainer
 
 # utilized original implementaion
 sys.path.append("papercode/ProxyExplainer")
@@ -43,11 +43,7 @@ class ProxyExplainerImpl(Explainer):
             return x
 
     def explain_graph_task(self, task: InductiveGraphClassification, graphs):
-        model = (
-            get_weighted_model(task.model)
-            if isinstance(task.model.node_model, (NodeGIN, NodeGCN))
-            else task.model
-        )
+        model = task.model # assume already weighted
 
         # freeze all layers
         model.eval()
@@ -74,5 +70,6 @@ class ProxyExplainerImpl(Explainer):
 
         return graph_masks
 
-    def explain_node_task(self, task, graph):
-        return super().explain_node_task(task, graph)
+    def explain_node_task(self, task: TransductiveNodeClassification, graph):
+        raise NotImplementedError("ProxyExplainer does not support node-level explanations.")
+    

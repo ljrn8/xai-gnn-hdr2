@@ -111,9 +111,9 @@ class GraphTaskFromNodeModel(nn.Module):
         self.dropout = dropout
         self.lin = nn.Linear(incoming_channels, output_graph_channels)
 
-    def forward(self, x, edge_index, return_embeds=False):
-        # get the final output of the last GIN (considered as the embeddings here)
-        x = self.node_model(x, edge_index, return_embeds=False)
+    def forward(self, x, edge_index, edge_weight=None, return_embeds=False):
+        # get the final output of the last graph layer (considered as the embeddings here)
+        x = self.node_model(x, edge_index, edge_weight=edge_weight, return_embeds=False)
         if return_embeds:
             return x
 
