@@ -32,7 +32,7 @@ parser.add_argument("-g", "--graph-level", action="store_true")
 parser.add_argument(
     "--model-configurations",
     help="Key in configuration.json specifying which model configurations to use for training for HPO",
-    required=True,
+    default="inductive small graphs"
 )
 parser.add_argument(
     "-i",

@@ -2,11 +2,19 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Run xai for delta",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "explainability.run_explainers",
+            "args": ["--ds-root", "output/delta", "-g"],
+            "justMyCode": true
+        },
+        {
             "name": "Eval xai for delta",
             "type": "debugpy",
             "request": "launch",
             "module": "explainability.evaluate",
-            "args": ["--ds-root", "output/graph_level/delta", "-gt", "ogx"],
+            "args": ["--ds-root", "output/delta", "-gt", "ogx"],
             "justMyCode": true
         },
         {

@@ -9,8 +9,7 @@ from training.GNN_utils import *
 from explainability.explainer_utils import Explanation
 from pathlib import Path
 import argparse
-from explainability.baselines.ORExplainer_old import ORExplainer
-from explainability.baselines.ProxyExplainer import ProxyExplainerImpl
+from explainability.explainers.PGExplainer import PGExplainer
 
 torch.autograd.set_detect_anomaly(True, check_nan=False)
 
@@ -23,12 +22,22 @@ parser.add_argument("-g", "--graph-level", action="store_true")
 
 # generic parameters
 parser.add_argument('-e', "--epochs", type=int, default=100)
+parser.add_argument('-lr', "--learning-rate", type=float, default=0.01)
 parser.add_argument("--hidden-size", type=int, default=64)
 parser.add_argument("--explainer", type=str, default=None, help=f'only run a specific explainer by name. For options see explainability.baselines')
 args = parser.parse_args()
 
 explainer_map = {
-    "ORExplainer": ORExplainer(hidden_channels=args.hidden_size, epochs=args.epochs, gamma=0.1),
+    "PGExplainer": PGExplainer(
+        epochs=args.epochs, 
+        hidden_size=args.hidden_size, 
+        lr=args.learning_rate, 
+        mean_regularization=0.1, 
+        entropy_regularization=0.05,
+        tau=0.3,
+        reparameterization_samples=30
+    ),
+    # "ORExplainer": ORExplainer(hidden_channels=args.hidden_size, epochs=args.epochs, gamma=0.1),
     # "PROXYExplainer": ProxyExplainerImpl(epochs=args.epochs),
 }
 
@@ -53,13 +62,13 @@ for explainer_name, expl in explainer_map.items():
 
         if args.graph_level:
             test_graphs = openpkl(path / "test_graphs.pkl")
-            masks = expl.explain_graph_task(run.task, test_graphs)
+            masks = expl.explain_graph_task(run.task.model, test_graphs)
             # ! expectes edge mask
             explanation = Explanation(run=run, edge_masks=masks, task_type="graph")
 
         elif args.node_level:
             test_graph = openpkl(path / "graph.pkl")
-            masks = expl.explain_node_task(run.task, test_graph)
+            masks = expl.explain_node_task(run.task.model, test_graph)
             # ! expects edge mask
             explanation = Explanation(run=run, edge_masks=masks, task_type="node")
 

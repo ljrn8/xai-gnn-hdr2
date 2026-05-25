@@ -5,15 +5,16 @@ import sys
 from training.GNN_utils import *
 from abc import ABC, abstractmethod
 from torch_geometric.data import Data
-
+from collections.abc import Iterable
+from kneed import KneeLocator
 
 class Explainer(ABC):
     @abstractmethod
-    def explain_node_task(self, model: GNN, graph):
+    def explain_node_task(self, model: GNN, graph: Data):
         """Returns edge importance scores for graph at each node"""
 
     @abstractmethod
-    def explain_graph_task(self, model: GNN, graphs):
+    def explain_graph_task(self, model: GNN, graphs: Iterable[Data]):
         """Returns edge importance scores of all graphs"""
 
 
@@ -24,6 +25,61 @@ class Explanation:
     edge_masks: Iterable[torch.Tensor] = None
     node_masks: Iterable[torch.Tensor] = None
 
+
+def elementwise_entropy(p):
+    eps = 1e-8
+    return - (
+        p * torch.log(p + eps) +
+        (1 - p) * torch.log(1 - p + eps)
+    )
+
+
+def otsu_threshold(x, bins=256):
+    x = np.asarray(x)
+    hist, bin_edges = np.histogram(x, bins=bins)
+    hist = hist.astype(float)
+    prob = hist / hist.sum()
+    centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+    omega = np.cumsum(prob)
+    mu = np.cumsum(prob * centers)
+    mu_t = mu[-1]
+    sigma_b = (mu_t * omega - mu) ** 2 / (omega * (1 - omega) + 1e-12)
+    idx = np.argmax(sigma_b)
+    return centers[idx]
+
+
+def knee_threshold(x):
+    x = np.sort(np.asarray(x))
+    kneedle = KneeLocator(range(len(x)), x, curve="convex", direction="increasing")
+    idx = kneedle.knee
+    return x[idx]
+
+
+def quantile_threshold(x, q=0.9, keep="above"):
+    scores = np.asarray(x)
+    threshold = np.quantile(scores, q)
+    return threshold
+
+
+def minimum_cluster_distance_threshhold(x):
+    """Warning: n^2"""
+    best_distance = float("inf")
+    best_k = 0
+    for k in range(1, len(x) + 1):
+        top_k_indicies = torch.topk(x, k).indices
+        neglected_indicies = torch.argsort(x)[:-k]
+        distance = 0
+        for i in range(len(x)):
+            for j in range(i + 1, len(x)):
+                if (i in top_k_indicies and j in top_k_indicies) or (
+                    i in neglected_indicies and j in neglected_indicies
+                ):
+                    distance += abs(x[i] - x[j])
+        if distance < best_distance:
+            best_distance = distance
+            best_k = k
+
+    return best_k, best_distance
 
 # --------------------------------------------------------
 # Convert Pretrained Models to Edge_weight handlable copies
