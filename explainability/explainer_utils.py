@@ -9,11 +9,11 @@ from torch_geometric.data import Data
 
 class Explainer(ABC):
     @abstractmethod
-    def explain_node_task(self, task, graph):
+    def explain_node_task(self, model: GNN, graph):
         """Returns edge importance scores for graph at each node"""
 
     @abstractmethod
-    def explain_graph_task(self, task, graphs):
+    def explain_graph_task(self, model: GNN, graphs):
         """Returns edge importance scores of all graphs"""
 
 
@@ -27,7 +27,6 @@ class Explanation:
 
 # --------------------------------------------------------
 # Convert Pretrained Models to Edge_weight handlable copies
-
 
 class WeightedGINConv(MessagePassing):
     def __init__(self, nn, eps=0.0):
@@ -138,7 +137,7 @@ def _get_weighted_GCN(graph_level_model):
     first_conv = graph_level_model.node_model.convs[0]
     num_layers = len(graph_level_model.node_model.convs)
     hidden_channels = first_conv.out_channels
-    empty_model = GraphTaskFromNodeModel(
+    empty_model = GraphGNNWrapper(
         node_model=WeightedNodeGCN(
             input_feat=first_conv.in_channels,
             num_layers=num_layers,
@@ -159,7 +158,7 @@ def _get_weighted_GCN(graph_level_model):
 def _get_weighted_GIN(graph_level_model):
     first_nn = graph_level_model.node_model.convs[0].nn[0]
     hidden_channels = first_nn.out_features
-    empty_model = GraphTaskFromNodeModel(
+    empty_model = GraphGNNWrapper(
         node_model=WeightedNodeGIN(
             input_feat=first_nn.in_features,
             num_layers=len(graph_level_model.node_model.convs),

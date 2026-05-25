@@ -3,7 +3,7 @@ import sys
 import torch
 import torch.nn.functional as F
 from loguru import logger
-from training.models import MODEL_ID, GraphTaskFromNodeModel
+from training.models import MODEL_ID, GraphGNNWrapper
 from training.GNN_utils import (
     TransductiveNodeClassification,
     openpkl,
@@ -98,7 +98,7 @@ for model_name, candidates in model_configs.items():
         # Task training
         model_class = MODEL_ID[model_name]
         if args.graph_level:
-            model = GraphTaskFromNodeModel(
+            model = GraphGNNWrapper(
                 node_model=model_class(
                     input_feat=num_features,
                     hidden_channels=hp["hidden_channels"],

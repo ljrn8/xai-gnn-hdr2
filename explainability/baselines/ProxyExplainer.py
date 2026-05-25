@@ -42,8 +42,7 @@ class ProxyExplainerImpl(Explainer):
             x = self.model.lin(x)
             return x
 
-    def explain_graph_task(self, task: InductiveGraphClassification, graphs):
-        model = task.model # assume already weighted
+    def explain_graph_task(self, model: GNN, graphs):
 
         # freeze all layers
         model.eval()
@@ -70,6 +69,6 @@ class ProxyExplainerImpl(Explainer):
 
         return graph_masks
 
-    def explain_node_task(self, task: TransductiveNodeClassification, graph):
+    def explain_node_task(self, model: GNN, graph):
         raise NotImplementedError("ProxyExplainer does not support node-level explanations.")
     

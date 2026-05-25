@@ -9,7 +9,7 @@ from training.GNN_utils import *
 from explainability.explainer_utils import Explanation
 from pathlib import Path
 import argparse
-from explainability.baselines.ORExplainer import ORExplainer
+from explainability.baselines.ORExplainer_old import ORExplainer
 from explainability.baselines.ProxyExplainer import ProxyExplainerImpl
 
 torch.autograd.set_detect_anomaly(True, check_nan=False)
