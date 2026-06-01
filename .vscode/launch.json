@@ -2,6 +2,14 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "train models on delta",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "training.train_models",
+            "args": ["--ds-root", "output/delta", "-g", "--model-configurations", "transductive citation datasets"],
+            "justMyCode": true
+        },
+        {
             "name": "Run xai for delta",
             "type": "debugpy",
             "request": "launch",

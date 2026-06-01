@@ -23,13 +23,15 @@ parser.add_argument(
 )
 parser.add_argument("-gt", "--dataset-for-GT", help="Specify the dataset to use for GT masks. Options: mutag, ogx, cora, citeseer", 
                     required=True)
+
+parser.add_argument("-auc", help="only report auc metrics", action='store_true')
 args = parser.parse_args()
 
 
 def evaluate_GT_edge_mask(
     GT_edge_mask: torch.Tensor, predicted_edge_mask: torch.Tensor, threshholder
 ):
-    print(f"\n > Classification report with {threshholder.__name__} thresholding ")
+    print(f"\n > Results with {threshholder.__name__} thresholding")
     threshhold = threshholder(predicted_edge_mask)
     thresholded_mask = predicted_edge_mask >= threshhold
 
@@ -43,8 +45,9 @@ def evaluate_GT_edge_mask(
         plt.hist(predicted_edge_mask.cpu().numpy(), bins=50)
         plt.axvline(threshhold, color='red', linestyle='dashed', linewidth=1)
         plt.show()
-
-    print(classification_report(GT_edge_mask, thresholded_mask))
+    
+    if not args.auc:
+        print(classification_report(GT_edge_mask, thresholded_mask))
     roc_auc = roc_auc_score(GT_edge_mask, thresholded_mask)
     pr_auc = average_precision_score(GT_edge_mask, thresholded_mask)
     print(f"ROC AUC: {roc_auc:.5f}, PR AUC: {pr_auc:.5f}")
@@ -101,12 +104,6 @@ for explainer_folder in os.listdir(explanations_root):
             # no GT available, stick to Fidelity and stability
             ...
 
-        
-
-
-        # -------------------------------
-        # fucked zone
-
         logger.info('NON-INVERTED')
 
         def fixed_threshhold(x):
@@ -114,12 +111,13 @@ for explainer_folder in os.listdir(explanations_root):
 
         GT_edge_masks = torch.cat(GT_edge_masks).float()
         edge_masks = torch.cat(edge_masks).float()
+        edge_masks = edge_masks.view(-1)
 
         for threshholder in (
                 otsu_threshold,
-                knee_threshold,
-                quantile_threshold,
-                fixed_threshhold
+                # knee_threshold,
+                # quantile_threshold,
+                # fixed_threshhold
             ):
                 _ = evaluate_GT_edge_mask(
                     GT_edge_masks, edge_masks,
@@ -131,9 +129,9 @@ for explainer_folder in os.listdir(explanations_root):
 
         for threshholder in (
                 otsu_threshold,
-                knee_threshold,
-                quantile_threshold,
-                fixed_threshhold
+                # knee_threshold,
+                # quantile_threshold,
+                # fixed_threshhold
             ):
                 _ = evaluate_GT_edge_mask(
                     GT_edge_masks, edge_masks,

@@ -43,12 +43,12 @@ class WeightedNodeGCN(GNN):
         embeddings = []
         for conv in self.convs[:-1]:
             x = conv(x, edge_index, edge_weight=edge_weight)
+            if return_all_embeddings:
+                embeddings.append(x)
+                
             x = x.relu()
             if self.dropout:
                 x = F.dropout(x, p=self.dropout, training=self.training)
-
-            if return_all_embeddings:
-                embeddings.append(x)
 
         x = self.convs[-1](x, edge_index, edge_weight=edge_weight)
         if return_all_embeddings:
@@ -119,12 +119,12 @@ class WeightedNodeGIN(GNN):
         embeddings = []
         for conv in self.convs[:-1]:
             x = conv(x, edge_index, edge_weight=edge_weight)
+            if return_all_embeddings:
+                embeddings.append(x)
+
             x = x.relu()
             if self.dropout:
                 x = F.dropout(x, p=self.dropout, training=self.training)
-
-            if return_all_embeddings:
-                embeddings.append(x)
 
         x = self.convs[-1](x, edge_index, edge_weight=edge_weight)
         if return_all_embeddings:
@@ -146,7 +146,7 @@ class GraphGNNWrapper(GNN):
     def layers(self):
         return self.node_model.layers + [self.lin]
 
-    def forward(self, x, edge_index, edge_weight=None, return_all_embeddings=False):
+    def forward(self, x, edge_index, edge_weight=None, return_all_embeddings=False, batch=None):
         x = self.node_model(x, edge_index, edge_weight=edge_weight, return_all_embeddings=return_all_embeddings)
         if return_all_embeddings:
             x, embeddings = x
@@ -156,11 +156,12 @@ class GraphGNNWrapper(GNN):
         if self.dropout:
             x = F.dropout(x, p=self.dropout, training=self.training)
 
-        x = global_mean_pool(x, batch=None)
+        x = global_mean_pool(x, batch=batch)
+
         x = self.lin(x)
         if return_all_embeddings:
             return x, embeddings
-        
+
         return x
 
 # for config JSON mapping

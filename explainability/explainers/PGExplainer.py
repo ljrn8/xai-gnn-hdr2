@@ -8,6 +8,8 @@ from torch_geometric.data import Data
 from tqdm import tqdm
 from collections.abc import Iterable
 import numpy as np
+from loguru import logger
+from torch_geometric.data import Batch
 
 class PGExplainer(Explainer):
     def __init__(
@@ -30,21 +32,17 @@ class PGExplainer(Explainer):
         self.reparameterization_samples = reparameterization_samples
         self.loss_f = loss_f
 
-    def _estimate_masked_prediction(
-        self, model: GNN, G: Data, edge_mask_logits: Tensor, samples: int
-    ):
-        scores = []
-        for _ in range(samples):
-            hard_mask = self._binary_concrete_sample(edge_mask_logits, self.tau)
-            score = torch.sigmoid(model(G.x, G.edge_index, edge_weight=hard_mask))
-            scores.append(score)
-
-        return torch.mean(torch.cat(scores))
-
-    def _binary_concrete_sample(self, edge_mask_logits, tau):
-        e = rand.uniform(0, 1)
-        log_noise = np.log(e) - np.log(1 - e)
-        return torch.sigmoid((edge_mask_logits + log_noise) / tau)
+    def _batched_estimate_masked_prediction(self, model: GNN, G: Data, edge_mask_logits: Tensor, samples: int) -> float:
+        u = torch.rand(samples, edge_mask_logits.shape[0]).clamp(1e-6, 1 - 1e-6)
+        log_noise = torch.log(u) - torch.log(1 - u)
+        hard_masks = torch.sigmoid(
+            (edge_mask_logits.squeeze() + log_noise) / self.tau
+        )
+        batched_G = Batch.from_data_list([G] * samples)
+        edge_weight = hard_masks.reshape(-1)
+        scores = torch.sigmoid(model(batched_G.x, batched_G.edge_index, 
+                                    edge_weight=edge_weight, batch=batched_G.batch))
+        return scores.view(-1).mean()
 
     def explain_graph_task(self, model: GNN, graphs: Iterable[Data]):
         model.eval()
@@ -64,7 +62,7 @@ class PGExplainer(Explainer):
         y_preds = torch.cat(y_preds).detach()  # ensure no backprop
         embedding_size = final_embeddings[0].shape[1]
         mlp = nn.Sequential(
-            nn.Linear(in_features=embedding_size, out_features=self.hidden_size),
+            nn.Linear(in_features=embedding_size*2, out_features=self.hidden_size),
             nn.ReLU(),
             nn.Linear(in_features=self.hidden_size, out_features=1),
         )
@@ -77,21 +75,25 @@ class PGExplainer(Explainer):
             masks = []
             mean_reg = 0
             entropy_reg = 0
+
             for G, final_embedding in zip(graphs, final_embeddings):
-                edge_mask_logits = mlp(final_embedding)
-                y_pred = self._estimate_masked_prediction(
+                src, dst = G.edge_index
+                edge_concatenated_embeddings = torch.cat((final_embedding[src], final_embedding[dst]), dim=1) 
+                edge_mask_logits = mlp(edge_concatenated_embeddings)
+                y_pred = self._batched_estimate_masked_prediction(
                     model, G, edge_mask_logits, samples=self.reparameterization_samples
                 )
                 explanatory_y_preds.append(y_pred)
                 soft_edge_mask = torch.sigmoid(edge_mask_logits)
                 masks.append(soft_edge_mask)
-                mean_reg += (
+                entropy_reg += (
                     self.entropy_regularization
-                    * elementwise_entropy(edge_mask_logits).mean()
+                    * elementwise_entropy(soft_edge_mask).mean()
                 )
-                entropy_reg += self.mean_regularization * soft_edge_mask.mean()
+                mean_reg += self.mean_regularization * soft_edge_mask.mean()
 
-            loss = self.loss_f(torch.cat(explanatory_y_preds), y_preds)
+            stacked = torch.stack(explanatory_y_preds)
+            loss = self.loss_f(stacked, y_preds)
 
             mean_reg /= len(graphs)
             entropy_reg /= len(graphs)
