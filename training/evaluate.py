@@ -18,6 +18,7 @@ from pathlib import Path
 import sys
 import argparse
 import numpy as np
+
 parser = argparse.ArgumentParser()
 parser.add_argument(
     "--ds-root", help="Root directory containing dataset to evaluate on"
@@ -26,7 +27,9 @@ parser.add_argument("-n", "--node-level", action="store_true")
 parser.add_argument("-g", "--graph-level", action="store_true")
 
 args = parser.parse_args()
-assert args.node_level ^ args.graph_level, "Must specify exactly one of --node-level or --graph-level"
+assert (
+    args.node_level ^ args.graph_level
+), "Must specify exactly one of --node-level or --graph-level"
 
 path = Path(args.ds_root)
 logger.info(f" > Dataset name: {path.name}")
@@ -35,7 +38,7 @@ for model in os.listdir(path / "models"):
     model_run: TrainingRun = openpkl(path / "models" / model)
     test_loss, y_true, y_scores = model_run.task.evaluate_test()
 
-    multiclass =  np.array(y_true).max() > 1
+    multiclass = np.array(y_true).max() > 1
     performance = (
         evaluate_multiclass_predictions(y_true, y_scores)
         if multiclass

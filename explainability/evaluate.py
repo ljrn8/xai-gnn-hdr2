@@ -16,15 +16,19 @@ from sklearn.metrics import (
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
-"--ds-root", help="Root directory containing dataset to evaluate on"
+    "--ds-root", help="Root directory containing dataset to evaluate on"
 )
 parser.add_argument(
     "-v", "--verbose", action="store_true", help="Enable verbose logging"
 )
-parser.add_argument("-gt", "--dataset-for-GT", help="Specify the dataset to use for GT masks. Options: mutag, ogx, cora, citeseer", 
-                    required=True)
+parser.add_argument(
+    "-gt",
+    "--dataset-for-GT",
+    help="Specify the dataset to use for GT masks. Options: mutag, ogx, cora, citeseer",
+    required=True,
+)
 
-parser.add_argument("-auc", help="only report auc metrics", action='store_true')
+parser.add_argument("-auc", help="only report auc metrics", action="store_true")
 args = parser.parse_args()
 
 
@@ -36,16 +40,19 @@ def evaluate_GT_edge_mask(
     thresholded_mask = predicted_edge_mask >= threshhold
 
     if args.verbose:
-        print(f'total explantory edges  : {thresholded_mask.sum()}')
-        print(f'total non-explanatory edges  : {len(thresholded_mask) - thresholded_mask.sum()}')
-        print(f'total GT explantory edges : {GT_edge_mask.sum()}')
+        print(f"total explantory edges  : {thresholded_mask.sum()}")
+        print(
+            f"total non-explanatory edges  : {len(thresholded_mask) - thresholded_mask.sum()}"
+        )
+        print(f"total GT explantory edges : {GT_edge_mask.sum()}")
 
         # histogram of the predicted edge mask
         import matplotlib.pyplot as plt
+
         plt.hist(predicted_edge_mask.cpu().numpy(), bins=50)
-        plt.axvline(threshhold, color='red', linestyle='dashed', linewidth=1)
+        plt.axvline(threshhold, color="red", linestyle="dashed", linewidth=1)
         plt.show()
-    
+
     if not args.auc:
         print(classification_report(GT_edge_mask, thresholded_mask))
     roc_auc = roc_auc_score(GT_edge_mask, thresholded_mask)
@@ -88,7 +95,7 @@ for explainer_folder in os.listdir(explanations_root):
 
             # requires that both the source and destiation node are important for the edge mask
             GT_edge_masks = [
-                mask[edge_index[0]] & mask[edge_index[1]] 
+                mask[edge_index[0]] & mask[edge_index[1]]
                 for mask, edge_index in zip(GT_node_masks, edge_indexes)
             ]
 
@@ -98,13 +105,12 @@ for explainer_folder in os.listdir(explanations_root):
                     print(f"\n\nGT edge mask {i}: {GT_edge_masks[i]}")
                     print(f"Predicted edge mask {i}: {edge_masks[i]}")
 
-
         elif args.dataset_for_GT == "citeseer" or args.dataset_for_GT == "cora":
             graph = openpkl(dataset_path / "graph.pkl")
             # no GT available, stick to Fidelity and stability
             ...
 
-        logger.info('NON-INVERTED')
+        logger.info("NON-INVERTED")
 
         def fixed_threshhold(x):
             return 1e-10
@@ -114,26 +120,20 @@ for explainer_folder in os.listdir(explanations_root):
         edge_masks = edge_masks.view(-1)
 
         for threshholder in (
-                otsu_threshold,
-                # knee_threshold,
-                # quantile_threshold,
-                # fixed_threshhold
-            ):
-                _ = evaluate_GT_edge_mask(
-                    GT_edge_masks, edge_masks,
-                    threshholder
-                )
+            otsu_threshold,
+            # knee_threshold,
+            # quantile_threshold,
+            # fixed_threshhold
+        ):
+            _ = evaluate_GT_edge_mask(GT_edge_masks, edge_masks, threshholder)
 
         edge_masks = 1 - edge_masks
-        logger.info('INVERTED')
+        logger.info("INVERTED")
 
         for threshholder in (
-                otsu_threshold,
-                # knee_threshold,
-                # quantile_threshold,
-                # fixed_threshhold
-            ):
-                _ = evaluate_GT_edge_mask(
-                    GT_edge_masks, edge_masks,
-                    threshholder
-                )
+            otsu_threshold,
+            # knee_threshold,
+            # quantile_threshold,
+            # fixed_threshhold
+        ):
+            _ = evaluate_GT_edge_mask(GT_edge_masks, edge_masks, threshholder)

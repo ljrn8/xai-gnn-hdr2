@@ -10,6 +10,7 @@ from abc import ABC, abstractmethod
 
 class GNN(ABC, nn.Module):
     """Interface for GNN models on node-featured static graphs"""
+
     @property
     @abstractmethod
     def layers(self):
@@ -18,6 +19,7 @@ class GNN(ABC, nn.Module):
     @abstractmethod
     def forward(self, x, edge_index, edge_weight=None, return_all_embeddings=False):
         pass
+
 
 class WeightedNodeGCN(GNN):
     """GCN model variant that can handle an edge_weight in forward(),
@@ -45,7 +47,7 @@ class WeightedNodeGCN(GNN):
             x = conv(x, edge_index, edge_weight=edge_weight)
             if return_all_embeddings:
                 embeddings.append(x)
-                
+
             x = x.relu()
             if self.dropout:
                 x = F.dropout(x, p=self.dropout, training=self.training)
@@ -53,8 +55,9 @@ class WeightedNodeGCN(GNN):
         x = self.convs[-1](x, edge_index, edge_weight=edge_weight)
         if return_all_embeddings:
             return x, embeddings
-        
+
         return x
+
 
 class WeightedGINConv(MessagePassing):
     def __init__(self, nn, eps=0.0):
@@ -146,11 +149,18 @@ class GraphGNNWrapper(GNN):
     def layers(self):
         return self.node_model.layers + [self.lin]
 
-    def forward(self, x, edge_index, edge_weight=None, return_all_embeddings=False, batch=None):
-        x = self.node_model(x, edge_index, edge_weight=edge_weight, return_all_embeddings=return_all_embeddings)
+    def forward(
+        self, x, edge_index, edge_weight=None, return_all_embeddings=False, batch=None
+    ):
+        x = self.node_model(
+            x,
+            edge_index,
+            edge_weight=edge_weight,
+            return_all_embeddings=return_all_embeddings,
+        )
         if return_all_embeddings:
             x, embeddings = x
-            embeddings.append(x) 
+            embeddings.append(x)
 
         x = x.relu()
         if self.dropout:
@@ -163,6 +173,7 @@ class GraphGNNWrapper(GNN):
             return x, embeddings
 
         return x
+
 
 # for config JSON mapping
 MODEL_ID = {

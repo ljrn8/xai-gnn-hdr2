@@ -10,17 +10,140 @@ from collections.abc import Iterable
 import numpy as np
 from loguru import logger
 from torch_geometric.data import Batch
+from abc import ABC, abstractmethod
+from typing import Optional
+
+
+def batched_estimate_masked_prediction(
+    tau, model: GNN, G: Data, edge_mask_logits: Tensor, samples: int
+) -> float:
+    """Determine MC estimate of a masked prediction using Binary Concrete reparameterization"""
+    u = torch.rand(samples, edge_mask_logits.shape[0]).clamp(1e-6, 1 - 1e-6)
+    log_noise = torch.log(u) - torch.log(1 - u)
+    hard_masks = torch.sigmoid((edge_mask_logits.squeeze() + log_noise) / tau)
+    batched_G = Batch.from_data_list([G] * samples)
+    edge_weight = hard_masks.reshape(-1)
+    scores = torch.sigmoid(model(
+        batched_G.x,
+        batched_G.edge_index,
+        edge_weight=edge_weight,
+        batch=batched_G.batch,
+    ))
+    return scores.view(-1).mean()
+
+
+class CustomExplanationModule(ABC, nn.Module):
+    @abstractmethod
+    def forward(
+        self,
+        model: GNN,
+        graphs: Data,
+    ) -> torch.Tensor:
+        """ Takes a (batched) graph object and model, producing an edge importance mask as *logits. 
+        """
+        pass
+
+
+class PGEExplanationModule(CustomExplanationModule):
+    """ Default Explanation module for PGExplainer fitting an MLP over a model's final layer embeddings (concatenated for edge embeddings). 
+    """
+    def __init__(self, input_size, hidden_size):
+        super().__init__()
+        self.layers = nn.Sequential(
+            nn.Linear(input_size, hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, 1),
+        )
+
+    def forward(self, model: GNN, graphs: Data):
+        _, embeddings_list = model.forward(
+            graphs.x,
+            graphs.edge_index,
+            return_all_embeddings=True,
+        )
+        final_embeddings = embeddings_list[-1]
+        src, dst = graphs.edge_index
+        edge_embeddings = torch.cat(
+            [
+                final_embeddings[src],
+                final_embeddings[dst],
+            ],
+            dim=-1,
+        )
+        return self.layers(edge_embeddings)
+
+
+class DeeperMLPExplanationModule(PGEExplanationModule):
+    """ Extension of the default PGExplainer module that fits all latent model embeddings. 
+    """
+    def forward(self, model: GNN, graphs: Data):
+        _, embeddings_list = model.forward(
+            graphs.x,
+            graphs.edge_index,
+            return_all_embeddings=True,
+        )
+        node_embeddings = torch.stack(
+            embeddings_list,
+            dim=1,
+        ).flatten(start_dim=1)
+        src, dst = graphs.edge_index
+        edge_embeddings = torch.cat(
+            [
+                node_embeddings[src],
+                node_embeddings[dst],
+            ],
+            dim=-1,
+        )
+        return self.layers(edge_embeddings)
+
+
+class GRUExplanationModule(CustomExplanationModule):
+    """ Fits a GRU to all latent model embeddings, concatenating its own final node embeddings prior to a FC layer for mask output. 
+    """
+    def __init__(self, input_size, hidden_size):
+        super().__init__()
+        self.gru = nn.GRU(
+            input_size=input_size,
+            hidden_size=hidden_size,
+            batch_first=True,
+        )
+        self.fc = nn.Linear(hidden_size * 2, 1)
+
+    def forward(self, model: GNN, graphs: Data):
+        _, embeddings_list = model.forward(
+            graphs.x,
+            graphs.edge_index,
+            return_all_embeddings=True,
+        )
+        node_sequences = torch.stack(
+            embeddings_list,
+            dim=1,
+        )
+        _, h_n = self.gru(node_sequences)
+        node_representations = h_n[-1]
+        src, dst = graphs.edge_index
+        edge_representations = torch.cat(
+            [
+                node_representations[src],
+                node_representations[dst],
+            ],
+            dim=-1,
+        )
+        return self.fc(edge_representations)
+    
 
 class PGExplainer(Explainer):
+    """ Standrad PGExplainer Implementation for graph-level binary classification an abritrary explanation module.
+    """
     def __init__(
         self,
         epochs,
-        hidden_size,
         lr,
         mean_regularization,
         entropy_regularization,
         tau,
         reparameterization_samples,
+        explanation_model: CustomExplanationModule,
         loss_f=torch.nn.BCELoss(),
     ):
         self.epochs = epochs
@@ -28,45 +151,20 @@ class PGExplainer(Explainer):
         self.mean_regularization = mean_regularization
         self.entropy_regularization = entropy_regularization
         self.tau = tau
-        self.hidden_size = hidden_size
         self.reparameterization_samples = reparameterization_samples
         self.loss_f = loss_f
-
-    def _batched_estimate_masked_prediction(self, model: GNN, G: Data, edge_mask_logits: Tensor, samples: int) -> float:
-        u = torch.rand(samples, edge_mask_logits.shape[0]).clamp(1e-6, 1 - 1e-6)
-        log_noise = torch.log(u) - torch.log(1 - u)
-        hard_masks = torch.sigmoid(
-            (edge_mask_logits.squeeze() + log_noise) / self.tau
-        )
-        batched_G = Batch.from_data_list([G] * samples)
-        edge_weight = hard_masks.reshape(-1)
-        scores = torch.sigmoid(model(batched_G.x, batched_G.edge_index, 
-                                    edge_weight=edge_weight, batch=batched_G.batch))
-        return scores.view(-1).mean()
+        self.explanation_model = explanation_model
 
     def explain_graph_task(self, model: GNN, graphs: Iterable[Data]):
         model.eval()
         for param in model.parameters():
             param.requires_grad = False
 
-        y_preds, final_embeddings = [], []
-        for G in graphs:
-            if G.x.dim() == 1:
-                G.x = G.x.unsqueeze(1)
-
-            logit, emb = model(G.x, G.edge_index, return_all_embeddings=True)
-            logit = logit.view(-1)
-            final_embeddings.append(emb[-1])
-            y_preds.append(torch.sigmoid(logit))
+        # unmasked graph scores
+        y_preds = [torch.sigmoid(model(G.x, G.edge_index).view(-1)) for G in graphs]
 
         y_preds = torch.cat(y_preds).detach()  # ensure no backprop
-        embedding_size = final_embeddings[0].shape[1]
-        mlp = nn.Sequential(
-            nn.Linear(in_features=embedding_size*2, out_features=self.hidden_size),
-            nn.ReLU(),
-            nn.Linear(in_features=self.hidden_size, out_features=1),
-        )
-        optimizer = torch.optim.Adam(mlp.parameters(), lr=self.lr)
+        optimizer = torch.optim.Adam(self.explanation_model.parameters(), lr=self.lr)
 
         pbar = tqdm(range(1, self.epochs + 1))
         for epc in pbar:
@@ -76,11 +174,9 @@ class PGExplainer(Explainer):
             mean_reg = 0
             entropy_reg = 0
 
-            for G, final_embedding in zip(graphs, final_embeddings):
-                src, dst = G.edge_index
-                edge_concatenated_embeddings = torch.cat((final_embedding[src], final_embedding[dst]), dim=1) 
-                edge_mask_logits = mlp(edge_concatenated_embeddings)
-                y_pred = self._batched_estimate_masked_prediction(
+            for G in graphs:
+                edge_mask_logits = self.explanation_model(G=G, model=model)
+                y_pred = batched_estimate_masked_prediction(
                     model, G, edge_mask_logits, samples=self.reparameterization_samples
                 )
                 explanatory_y_preds.append(y_pred)
@@ -105,7 +201,6 @@ class PGExplainer(Explainer):
             )
 
         return masks
-
 
     def explain_node_task(self, model, graph):
         raise NotImplementedError()

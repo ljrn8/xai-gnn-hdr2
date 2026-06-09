@@ -32,8 +32,9 @@ class GradCAMExplainer(Explainer):
         for h in hooks:
             h.remove()
 
-    def _compute_edge_scores(self, model: GNN, x, edge_index,
-                              edge_weight=None, target_node=None):
+    def _compute_edge_scores(
+        self, model: GNN, x, edge_index, edge_weight=None, target_node=None
+    ):
         """
         Runs one forward+backward pass and returns per-edge importance scores.
 
@@ -61,8 +62,8 @@ class GradCAMExplainer(Explainer):
             self._remove_hooks(hooks)
 
         # activations: [N, d], gradients: [N, d]
-        A = self._activations          # node embeddings
-        G = self._gradients            # gradients w.r.t. those embeddings
+        A = self._activations  # node embeddings
+        G = self._gradients  # gradients w.r.t. those embeddings
 
         # Global-average-pool gradients over feature dim -> scalar weight per node
         # Then weight the activations and sum over features

@@ -3,8 +3,11 @@ from training.GNN_utils import GNN
 import torch
 import torch.nn as nn
 
+
 class ORExplainer(Explainer):
-    def __init__(self, hidden_channels=64, epochs=100, alpha=0.1, beta=0.1, gamma=0.1, bias=1e-10):
+    def __init__(
+        self, hidden_channels=64, epochs=100, alpha=0.1, beta=0.1, gamma=0.1, bias=1e-10
+    ):
         super(ORExplainer, self).__init__()
         self.hidden_channels = hidden_channels
         self.epochs = epochs
@@ -15,16 +18,18 @@ class ORExplainer(Explainer):
         self.hidden_channels = hidden_channels
 
     def explain_graph_task(self, model: GNN, test_graphs):
-        raise NotImplementedError("ORExplainer does not support graph-level explanations.")
+        raise NotImplementedError(
+            "ORExplainer does not support graph-level explanations."
+        )
 
-    def WEP_value(self, model, graph, edge_mask):
-        ...
+    def WEP_value(self, model, graph, edge_mask): ...
 
-    def gumbel_softmax_sampled_prediction(self, edge_mask, model, temperature=1.0):
-        ...
+    def gumbel_softmax_sampled_prediction(self, edge_mask, model, temperature=1.0): ...
 
     def explain_node_task(self, model: GNN, graph):
-        assert hasattr(graph, "test_mask"), "Graph must have a binary test_mask attribute for node-level explanations."
+        assert hasattr(
+            graph, "test_mask"
+        ), "Graph must have a binary test_mask attribute for node-level explanations."
         model.eval()
 
         # freeze all layers
@@ -48,7 +53,7 @@ class ORExplainer(Explainer):
             nn.Linear(concatenated_embeddings.size(1), self.hidden_channels),
             nn.ReLU(),
             nn.Linear(self.hidden_channels, 1),
-            nn.Sigmoid()
+            nn.Sigmoid(),
         )
 
         optimizer = torch.optim.Adam(mlp.parameters(), lr=0.01)
@@ -60,16 +65,12 @@ class ORExplainer(Explainer):
 
                 # predict edge importance scores
                 edge_mask = mlp(concatenated_embeddings).squeeze()
-                y_star = self.gumbel_softmax_sampled_prediction(edge_mask, model, temperature=1.0, index=node_index)
+                y_star = self.gumbel_softmax_sampled_prediction(
+                    edge_mask, model, temperature=1.0, index=node_index
+                )
                 y = test_y_logits[node_index]
-
 
                 # more efficiently produce node index predictions ..
 
-
             loss.backward()
             optimizer.step()
-
-
-
-        

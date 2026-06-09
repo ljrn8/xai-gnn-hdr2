@@ -70,5 +70,6 @@ class ProxyExplainerImpl(Explainer):
         return graph_masks
 
     def explain_node_task(self, model: GNN, graph):
-        raise NotImplementedError("ProxyExplainer does not support node-level explanations.")
-    
+        raise NotImplementedError(
+            "ProxyExplainer does not support node-level explanations."
+        )

@@ -8,6 +8,7 @@ from torch_geometric.data import Data
 from collections.abc import Iterable
 from kneed import KneeLocator
 
+
 class Explainer(ABC):
     @abstractmethod
     def explain_node_task(self, model: GNN, graph: Data):
@@ -28,10 +29,7 @@ class Explanation:
 
 def elementwise_entropy(p):
     eps = 1e-8
-    return - (
-        p * torch.log(p + eps) +
-        (1 - p) * torch.log(1 - p + eps)
-    )
+    return -(p * torch.log(p + eps) + (1 - p) * torch.log(1 - p + eps))
 
 
 def otsu_threshold(x, bins=256):
@@ -81,8 +79,10 @@ def minimum_cluster_distance_threshhold(x):
 
     return best_k, best_distance
 
+
 # --------------------------------------------------------
 # Convert Pretrained Models to Edge_weight handlable copies
+
 
 class WeightedGINConv(MessagePassing):
     def __init__(self, nn, eps=0.0):

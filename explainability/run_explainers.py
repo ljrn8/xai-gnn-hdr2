@@ -21,21 +21,27 @@ parser.add_argument("-n", "--node-level", action="store_true")
 parser.add_argument("-g", "--graph-level", action="store_true")
 
 # generic parameters
-parser.add_argument('-e', "--epochs", type=int, default=100)
-parser.add_argument('-lr', "--learning-rate", type=float, default=0.01)
+parser.add_argument("-e", "--epochs", type=int, default=100)
+parser.add_argument("-lr", "--learning-rate", type=float, default=0.01)
 parser.add_argument("--hidden-size", type=int, default=64)
-parser.add_argument("--explainer", type=str, default=None, help=f'only run a specific explainer by name. For options see explainability.baselines')
+parser.add_argument(
+    "--explainer",
+    type=str,
+    default=None,
+    help=f"only run a specific explainer by name. For options see explainability.baselines",
+)
 args = parser.parse_args()
+
 
 explainer_map = {
     "PGExplainer": PGExplainer(
-        epochs=args.epochs, 
-        hidden_size=args.hidden_size, 
-        lr=args.learning_rate, 
-        mean_regularization=0.1, 
+        epochs=args.epochs,
+        hidden_size=args.hidden_size,
+        lr=args.learning_rate,
+        mean_regularization=0.1,
         entropy_regularization=0.05,
         tau=0.3,
-        reparameterization_samples=30
+        reparameterization_samples=30,
     ),
     # "ORExplainer": ORExplainer(hidden_channels=args.hidden_size, epochs=args.epochs, gamma=0.1),
     # "PROXYExplainer": ProxyExplainerImpl(epochs=args.epochs),
@@ -58,7 +64,7 @@ for explainer_name, expl in explainer_map.items():
 
     for model_name, run in runs.items():
         model_name = model_name.split(".pkl")[0]
-        logger.info(f"Explaining model: {model_name} with explainer: {explainer_name} " )
+        logger.info(f"Explaining model: {model_name} with explainer: {explainer_name} ")
 
         if args.graph_level:
             test_graphs = openpkl(path / "test_graphs.pkl")
