@@ -1,5 +1,4 @@
 from sklearn import multiclass
-
 from training.GNN_utils import (
     InductiveGraphClassification,
     TransductiveNodeClassification,

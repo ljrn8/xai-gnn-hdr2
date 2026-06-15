@@ -10,6 +10,14 @@
             "justMyCode": true
         },
         {
+            "name": "Run xai for 6cycle/house",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "run_explainers.py",
+            "args": ["--ds-root", "output/6cycle-house"],
+            "justMyCode": true
+        },
+        {
             "name": "Run xai for delta",
             "type": "debugpy",
             "request": "launch",

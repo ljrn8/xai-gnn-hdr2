@@ -14,9 +14,10 @@ from sklearn.metrics import (
     classification_report,
 )
 
+
 parser = argparse.ArgumentParser()
 parser.add_argument(
-    "--ds-root", help="Root directory containing dataset to evaluate on"
+    '-ds', "--ds-root", help="Root directory containing dataset to evaluate on", required=True
 )
 parser.add_argument(
     "-v", "--verbose", action="store_true", help="Enable verbose logging"
@@ -30,7 +31,6 @@ parser.add_argument(
 
 parser.add_argument("-auc", help="only report auc metrics", action="store_true")
 args = parser.parse_args()
-
 
 def evaluate_GT_edge_mask(
     GT_edge_mask: torch.Tensor, predicted_edge_mask: torch.Tensor, threshholder
@@ -82,7 +82,6 @@ for explainer_folder in os.listdir(explanations_root):
         edge_masks = [e.detach() for e in explanation.edge_masks]
 
         # Ground truth masks are computed differently per dataset
-
         if args.dataset_for_GT == "mutag":
             test_graphs = openpkl(dataset_path / "test_graphs.pkl")
             results = compute_all_masks(test_graphs)
@@ -110,7 +109,13 @@ for explainer_folder in os.listdir(explanations_root):
             # no GT available, stick to Fidelity and stability
             ...
 
-        logger.info("NON-INVERTED")
+        elif args.dataset_for_GT == 'motifs':
+            test_graphs = openpkl(dataset_path / "test_graphs.pkl")
+            GT_edge_masks = [g.edge_mask for g in test_graphs]
+        
+        logger.debug(f'gt.shape for gt in edge_masks {[gt.shape for gt in edge_masks]}')
+        logger.debug(f'total values in edge_masks {sum([gt.sum() for gt in edge_masks])}')
+
 
         def fixed_threshhold(x):
             return 1e-10
@@ -119,21 +124,23 @@ for explainer_folder in os.listdir(explanations_root):
         edge_masks = torch.cat(edge_masks).float()
         edge_masks = edge_masks.view(-1)
 
+        
+
         for threshholder in (
             otsu_threshold,
-            # knee_threshold,
-            # quantile_threshold,
+            knee_threshold,
+            quantile_threshold,
             # fixed_threshhold
         ):
             _ = evaluate_GT_edge_mask(GT_edge_masks, edge_masks, threshholder)
 
-        edge_masks = 1 - edge_masks
-        logger.info("INVERTED")
+        # edge_masks = 1 - edge_masks
+        # logger.info("INVERTED")
 
-        for threshholder in (
-            otsu_threshold,
-            # knee_threshold,
-            # quantile_threshold,
-            # fixed_threshhold
-        ):
-            _ = evaluate_GT_edge_mask(GT_edge_masks, edge_masks, threshholder)
+        # for threshholder in (
+        #     otsu_threshold,
+        #     knee_threshold,
+        #     quantile_threshold,
+        #     # fixed_threshhold
+        # ):
+        #     _ = evaluate_GT_edge_mask(GT_edge_masks, edge_masks, threshholder)

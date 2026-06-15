@@ -11,11 +11,11 @@ from kneed import KneeLocator
 
 class Explainer(ABC):
     @abstractmethod
-    def explain_node_task(self, model: GNN, graph: Data):
+    def explain_node_task(self):
         """Returns edge importance scores for graph at each node"""
 
     @abstractmethod
-    def explain_graph_task(self, model: GNN, graphs: Iterable[Data]):
+    def explain_graph_task(self):
         """Returns edge importance scores of all graphs"""
 
 
