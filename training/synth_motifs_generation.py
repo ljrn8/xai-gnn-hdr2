@@ -25,8 +25,9 @@ def _ba2motif_gt_masks(data: Data) -> Data:
     return data
 
 
-def _build_treecircles(n_per_class: int = 500, tree_depth: int = 4,
-                       seed: int = 0) -> list:
+def _build_treecircles(
+    n_per_class: int = 500, tree_depth: int = 4, seed: int = 0
+) -> list:
     """
     Generates n_per_class graphs per class:
       class 0 — binary tree + 6-node cycle motif
@@ -38,7 +39,7 @@ def _build_treecircles(n_per_class: int = 500, tree_depth: int = 4,
     torch.manual_seed(seed)
     generators = [
         (CycleMotif(6), 0),
-        (HouseMotif(),  1),
+        (HouseMotif(), 1),
     ]
 
     graphs = []
@@ -53,37 +54,38 @@ def _build_treecircles(n_per_class: int = 500, tree_depth: int = 4,
             n = raw.num_nodes
             # Constant node features (same convention as BA2Motif)
             x = torch.full((n, 10), 0.1)
-            graphs.append(Data(
-                x=x,
-                edge_index=raw.edge_index,
-                y=torch.tensor(label, dtype=torch.long),
-                node_mask=raw.node_mask.float(),
-                edge_mask=raw.edge_mask.float(),
-            ))
+            graphs.append(
+                Data(
+                    x=x,
+                    edge_index=raw.edge_index,
+                    y=torch.tensor(label, dtype=torch.long),
+                    node_mask=raw.node_mask.float(),
+                    edge_mask=raw.edge_mask.float(),
+                )
+            )
 
     return graphs
 
 
-def _split(graphs: list, train: float, val: float, test: float,
-           seed: int) -> dict:
+def _split(graphs: list, train: float, val: float, test: float, seed: int) -> dict:
     assert abs(train + val + test - 1.0) < 1e-6, "Fractions must sum to 1."
     g = torch.Generator().manual_seed(seed)
     idx = torch.randperm(len(graphs), generator=g).tolist()
     n = len(graphs)
     n_train = int(n * train)
-    n_val   = int(n * val)
+    n_val = int(n * val)
     return {
         "train": [graphs[i] for i in idx[:n_train]],
-        "val":   [graphs[i] for i in idx[n_train:n_train + n_val]],
-        "test":  [graphs[i] for i in idx[n_train + n_val:]],
+        "val": [graphs[i] for i in idx[n_train : n_train + n_val]],
+        "test": [graphs[i] for i in idx[n_train + n_val :]],
     }
 
 
 def load_datasets(
     train: float = 0.8,
-    val:   float = 0.1,
-    test:  float = 0.1,
-    seed:  int   = 42,
+    val: float = 0.1,
+    test: float = 0.1,
+    seed: int = 42,
     ba2motif_root: str = "/tmp/ba2motif",
 ) -> tuple[dict, dict]:
     """
@@ -102,8 +104,8 @@ def load_datasets(
     ba2_splits = _split(ba2_graphs, train, val, test, seed)
 
     # --- TreeCircles ---
-    tc_graphs  = _build_treecircles(n_per_class=500, tree_depth=4, seed=seed)
-    tc_splits  = _split(tc_graphs,  train, val, test, seed)
+    tc_graphs = _build_treecircles(n_per_class=500, tree_depth=4, seed=seed)
+    tc_splits = _split(tc_graphs, train, val, test, seed)
 
     return ba2_splits, tc_splits
 
@@ -128,8 +130,10 @@ def summarise(name: str, splits: dict) -> None:
     print(f"  {name}")
     print(f"{'='*55}")
     print(f"  Total graphs   : {len(all_graphs)}")
-    print(f"  Train / Val / Test : "
-          f"{len(splits['train'])} / {len(splits['val'])} / {len(splits['test'])}")
+    print(
+        f"  Train / Val / Test : "
+        f"{len(splits['train'])} / {len(splits['val'])} / {len(splits['test'])}"
+    )
     print(f"  Node feature dim   : {sample.x.shape[1]}")
     print(f"    -> all-constant (0.1); purely structural task")
     print(f"  Num classes        : 2  (binary)")
@@ -139,8 +143,10 @@ def summarise(name: str, splits: dict) -> None:
         print(f"  {split_name:5s} class dist : label0={cc[0]}  label1={cc[1]}")
 
     sample_sizes = torch.tensor([g.num_nodes for g in all_graphs], dtype=torch.float)
-    print(f"  Nodes per graph    : min={int(sample_sizes.min())}  "
-          f"max={int(sample_sizes.max())}  mean={sample_sizes.mean():.1f}")
+    print(
+        f"  Nodes per graph    : min={int(sample_sizes.min())}  "
+        f"max={int(sample_sizes.max())}  mean={sample_sizes.mean():.1f}"
+    )
 
     mean_motif = _motif_node_stats(all_graphs)
     print(f"  Motifs per graph   : 1  (GT mask: {mean_motif:.1f} motif nodes avg)")
@@ -153,14 +159,17 @@ def summarise(name: str, splits: dict) -> None:
 
 if __name__ == "__main__":
     import argparse
+
     p = argparse.ArgumentParser()
     p.add_argument("--train", type=float, default=0.8)
-    p.add_argument("--val",   type=float, default=0.1)
-    p.add_argument("--test",  type=float, default=0.1)
-    p.add_argument("--seed",  type=int,   default=42)
+    p.add_argument("--val", type=float, default=0.1)
+    p.add_argument("--test", type=float, default=0.1)
+    p.add_argument("--seed", type=int, default=42)
     args = p.parse_args()
 
-    print(f"Split: train={args.train}  val={args.val}  test={args.test}  seed={args.seed}")
+    print(
+        f"Split: train={args.train}  val={args.val}  test={args.test}  seed={args.seed}"
+    )
 
     ba2_splits, tc_splits = load_datasets(
         train=args.train, val=args.val, test=args.test, seed=args.seed
@@ -171,28 +180,32 @@ if __name__ == "__main__":
 
     print("\nSample access:")
     g = ba2_splits["train"][0]
-    print(f"  g.x.shape={g.x.shape}  g.y={g.y.item()}  "
-          f"node_mask.sum={int(g.node_mask.sum())}  edge_mask.sum={int(g.edge_mask.sum())}")
-    
-    from pathlib import Path; import pickle
-    root = Path('../output/BA-5cycle')
+    print(
+        f"  g.x.shape={g.x.shape}  g.y={g.y.item()}  "
+        f"node_mask.sum={int(g.node_mask.sum())}  edge_mask.sum={int(g.edge_mask.sum())}"
+    )
+
+    from pathlib import Path
+    import pickle
+
+    root = Path("../output/BA-5cycle")
     root.mkdir(exist_ok=True)
-    with open(root / 'test_graphs.pkl', 'wb') as f:
-        pickle.dump(ba2_splits['test'], f)
+    with open(root / "test_graphs.pkl", "wb") as f:
+        pickle.dump(ba2_splits["test"], f)
 
-    with open(root / 'train_graphs.pkl', 'wb') as f:
-        pickle.dump(ba2_splits['train'], f)
+    with open(root / "train_graphs.pkl", "wb") as f:
+        pickle.dump(ba2_splits["train"], f)
 
-    with open(root / 'val_graphs.pkl', 'wb') as f:
-        pickle.dump(ba2_splits['val'], f)
+    with open(root / "val_graphs.pkl", "wb") as f:
+        pickle.dump(ba2_splits["val"], f)
 
-    root = Path('../output/6cycle-house')
+    root = Path("../output/6cycle-house")
     root.mkdir(exist_ok=True)
-    with open(root / 'test_graphs.pkl', 'wb') as f:
-        pickle.dump(ba2_splits['test'], f)
+    with open(root / "test_graphs.pkl", "wb") as f:
+        pickle.dump(ba2_splits["test"], f)
 
-    with open(root / 'train_graphs.pkl', 'wb') as f:
-        pickle.dump(ba2_splits['train'], f)
+    with open(root / "train_graphs.pkl", "wb") as f:
+        pickle.dump(ba2_splits["train"], f)
 
-    with open(root / 'val_graphs.pkl', 'wb') as f:
-        pickle.dump(ba2_splits['val'], f)
+    with open(root / "val_graphs.pkl", "wb") as f:
+        pickle.dump(ba2_splits["val"], f)

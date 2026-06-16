@@ -23,7 +23,6 @@ from sklearn.metrics import (
 
 from training.models import *
 
-
 def openpkl(file):
     logger.info(f"Opening file: {file}")
     with open(file, "rb") as f:

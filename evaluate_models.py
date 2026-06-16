@@ -18,37 +18,41 @@ import sys
 import argparse
 import numpy as np
 
-parser = argparse.ArgumentParser()
-parser.add_argument(
-    "--ds-root", help="Root directory containing dataset to evaluate on"
-)
-parser.add_argument("-n", "--node-level", action="store_true")
-parser.add_argument("-g", "--graph-level", action="store_true")
 
-args = parser.parse_args()
-assert (
-    args.node_level ^ args.graph_level
-), "Must specify exactly one of --node-level or --graph-level"
+def main(args):
+    path = Path(args.ds_root)
+    logger.info(f" > Dataset name: {path.name}")
+    for model in os.listdir(path / "models"):
+        logger.info(f"\n\n eval for model [{model}]")
+        model_run: TrainingRun = openpkl(path / "models" / model)
+        test_loss, y_true, y_scores = model_run.task.evaluate_test()
+        multiclass = np.array(y_true).max() > 1
+        performance = (
+            evaluate_multiclass_predictions(y_true, y_scores)
+            if multiclass
+            else evaluate_binary_predictions(y_true, y_scores)
+        )
 
-path = Path(args.ds_root)
-logger.info(f" > Dataset name: {path.name}")
-for model in os.listdir(path / "models"):
-    logger.info(f"\n\n eval for model [{model}]")
-    model_run: TrainingRun = openpkl(path / "models" / model)
-    test_loss, y_true, y_scores = model_run.task.evaluate_test()
+        logger.info(f"model object: ")
+        pprint(model_run.task.model)
+        logger.info(f"f1: {performance.f1:.4f}")
+        logger.info(f"Test performance:")
+        pprint(performance)
+        logger.info(f"hyperparameters: ")
+        pprint(model_run.hyperparameter)
+        logger.info(f"epochs trained: {model_run.epochs_trained}")
 
-    multiclass = np.array(y_true).max() > 1
-    performance = (
-        evaluate_multiclass_predictions(y_true, y_scores)
-        if multiclass
-        else evaluate_binary_predictions(y_true, y_scores)
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--ds-root", help="Root directory containing dataset to evaluate on"
     )
+    parser.add_argument("-n", "--node-level", action="store_true")
+    parser.add_argument("-g", "--graph-level", action="store_true")
 
-    logger.info(f"model object: ")
-    pprint(model_run.task.model)
-    logger.info(f"f1: {performance.f1:.4f}")
-    logger.info(f"Test performance:")
-    pprint(performance)
-    logger.info(f"hyperparameters: ")
-    pprint(model_run.hyperparameter)
-    logger.info(f"epochs trained: {model_run.epochs_trained}")
+    args = parser.parse_args()
+    assert (
+        args.node_level ^ args.graph_level
+    ), "Must specify exactly one of --node-level or --graph-level"
+
