@@ -25,11 +25,13 @@ O_IDX = ATOM_TYPES.index("O")  # 2
 
 def get_atom_type(node_features: torch.Tensor) -> int:
     """Return the atom index (into ATOM_TYPES) for a one-hot node feature vector."""
+    
     return int(node_features.argmax().item())
 
 
 def build_adjacency(edge_index: torch.Tensor, num_nodes: int) -> dict:
     """Return {node: set(neighbors)} from a COO edge_index."""
+
     adj = {i: set() for i in range(num_nodes)}
     src, dst = edge_index
     for s, d in zip(src.tolist(), dst.tolist()):
