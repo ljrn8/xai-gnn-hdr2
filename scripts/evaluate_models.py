@@ -1,5 +1,5 @@
 from sklearn import multiclass
-from training.GNN_utils import (
+from src.gnn_xai.training.train import (
     InductiveGraphClassification,
     TransductiveNodeClassification,
     evaluate_binary_predictions,

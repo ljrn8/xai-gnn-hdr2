@@ -2,7 +2,7 @@ from torch_geometric.nn import MessagePassing, global_mean_pool
 from torch import nn
 import torch.functional as F
 import sys
-from training.GNN_utils import *
+from src.gnn_xai.training.train import *
 from abc import ABC, abstractmethod
 from torch_geometric.data import Data
 from collections.abc import Iterable

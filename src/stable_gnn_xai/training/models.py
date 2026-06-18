@@ -6,24 +6,12 @@ from torch_geometric.nn import GCNConv, GINConv
 from torch_geometric.nn import global_mean_pool
 from torch_geometric.nn import MessagePassing
 from abc import ABC, abstractmethod
-
-
-class GNN(ABC, nn.Module):
-    """Interface for GNN models on node-featured static graphs"""
-
-    @property
-    @abstractmethod
-    def layers(self):
-        pass
-
-    @abstractmethod
-    def forward(self, x, edge_index, edge_weight=None, return_all_embeddings=False):
-        pass
+from ..interfaces import GNN
 
 
 class WeightedNodeGCN(GNN):
-    """GCN model variant that can handle an edge_weight in forward(),
-    required for passing fractional subgraph explanations.
+    """GCN model variant that can handle an edge_weight in forward()
+    Required for passing fractional subgraph explanations.
     """
 
     def __init__(
@@ -77,7 +65,7 @@ class WeightedGINConv(MessagePassing):
 
 
 class WeightedNodeGIN(GNN):
-    """GIN model variant that can handle an edge_weight in forward(),
+    """GIN model variant that can handle an edge_weight in forward() 
     required for passing fractional subgraph explanations.
     """
 
@@ -137,6 +125,8 @@ class WeightedNodeGIN(GNN):
 
 
 class GraphGNNWrapper(GNN):
+    """Attatched FC linear layer to node classifier for graph classification (includes batch pooling)"""
+
     def __init__(
         self, node_model: GNN, incoming_channels, output_graph_channels, dropout=None
     ):
@@ -175,8 +165,3 @@ class GraphGNNWrapper(GNN):
         return x
 
 
-# for config JSON mapping
-MODEL_ID = {
-    "GCN": WeightedNodeGCN,
-    "GIN": WeightedNodeGIN,
-}

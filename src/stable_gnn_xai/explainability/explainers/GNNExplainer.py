@@ -1,5 +1,5 @@
 from ..explainer_utils import Explainer, elementwise_entropy, uniform_debug_log
-from training.GNN_utils import GNN
+from src.gnn_xai.training.train import GNN
 from torch_geometric.data import Data
 from typing_extensions import Iterable
 import torch

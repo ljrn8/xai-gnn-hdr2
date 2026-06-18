@@ -4,8 +4,8 @@ import torch.functional as F
 import sys
 from abc import ABC, abstractmethod
 from torch_geometric.data import Data
-from training.GNN_utils import *
-from explainability.explainer_utils import Explainer
+from src.gnn_xai.training.train import *
+from src.gnn_xai.explainability.explainer_utils import Explainer
 
 # utilized original implementaion
 sys.path.append("papercode/ProxyExplainer")

@@ -15,6 +15,9 @@ def run_explanation_pipeline(args, explainer_configurations = {
     for i in range(len(explainer_configurations.values()[0])):
         for ds_name in os.listdir(args['root']):
             logger.info(f'\n\n === BEGAN Running Explainer Configurations for dataset: {ds_name} === \n')
+            expl_main({
+                ''
+            })
 
 
 

@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
 from abc import ABC, abstractmethod
-from explainability.explainer_utils import Explainer
-from training.models import GNN
+from src.gnn_xai.explainability.explainer_utils import Explainer
+from src.gnn_xai.training.models import GNN
 
 
 class GradCAMExplainer(Explainer):
