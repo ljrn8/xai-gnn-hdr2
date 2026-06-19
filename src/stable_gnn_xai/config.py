@@ -11,6 +11,7 @@ DATASETS = {
 
 MODELS = {
     "output": Path("output/runs"),
+    'iterations': 10,
     "configurations": {
         "GCN": {
             'base_class': WeightedNodeGCN,
@@ -18,7 +19,6 @@ MODELS = {
             "epochs": [100, 300, 400, 200],
             "hidden_channels": [32, 64],
             "num_layers": [1, 2, 3],
-            "dropout": [0.0, 0.5]
         },
         "GIN": {
             'base_class': WeightedNodeGIN,

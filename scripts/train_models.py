@@ -3,8 +3,8 @@ import sys
 import torch
 import torch.nn.functional as F
 from loguru import logger
-from src.gnn_xai.training.models import MODEL_ID, GraphGNNWrapper
-from src.gnn_xai.training.train import (
+from src.stable_gnn_xai.training.models import MODEL_ID, GraphGNNWrapper
+from src.stable_gnn_xai.training.train import (
     TransductiveNodeClassification,
     openpkl,
     InductiveGraphClassification,

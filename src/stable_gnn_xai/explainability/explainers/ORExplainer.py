@@ -1,5 +1,5 @@
 from ..explainer_utils import Explainer
-from src.gnn_xai.training.train import GNN
+from src.stable_gnn_xai.training.train import GNN
 import torch
 import torch.nn as nn
 

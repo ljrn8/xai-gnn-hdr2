@@ -25,9 +25,15 @@ class GNN(ABC, nn.Module):
 
 
 @dataclass
-class TrainingRun:
+class ModelEvaluation:
+    y_pred_test: torch.Tensor
+    performance: Optional[dict]
+
+
+@dataclass
+class ModelRun:
     dataset_root: str
     model: GNN
     model_configuration: dict
-    y_pred: torch.Tensor
     details: Optional[dict]
+    test_evaluation: Optional[ModelEvaluation] = None
