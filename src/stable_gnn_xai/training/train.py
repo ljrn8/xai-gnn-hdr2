@@ -16,11 +16,12 @@ from sklearn.metrics import (
 )
 from torch_geometric.data import Data
 from pathlib import Path
-import os 
+import os
 from ..interfaces import GNN, ModelRun, ModelEvaluation
 from ..config import MODELS, DATASETS, SEED
 from ..util import openpkl, savepkl
 from .models import GraphGNNWrapper
+
 
 def _run_graphs(graphs: Iterable[Data], model: GNN, criterion, optimizer=None):
     """Run a training or evaluation loop over a set of graphs.
@@ -63,7 +64,7 @@ def train(
     lr: float,
     patience: int = 20,
     delta: float = 0.001,
-    verbose: bool = True
+    verbose: bool = True,
 ):
     """Generic training loop for binary graph classifiers.
     (Uses early stopping on validation loss)
@@ -86,7 +87,7 @@ def train(
     criterion = nn.BCEWithLogitsLoss()
     optimizer = optim.Adam(model.parameters(), lr=lr)
 
-    logger.info('Training and validating...')
+    logger.info("Training and validating...")
     for epc in pbar:
 
         # train
@@ -102,7 +103,6 @@ def train(
         val_losses.append(val_loss)
         validation_metrics = evaluate_binary_predictions(y_true, y_scores)
 
-
         # early stopping
         if best_loss - val_loss < delta:
             if early_stopping_counter >= patience:
@@ -116,11 +116,11 @@ def train(
 
         if val_loss < best_loss:
             best_loss = val_loss
-            best_model = deepcopy(model)
             best_epoch = epc
 
         pbar.set_description(
-            f"[epoch {epc}/{epochs} | train {train_loss:.4f} | val {val_loss:.4f} \n | val metrics: " + ", ".join([f"{k} {v:.4f}" for k, v in validation_metrics.items()])
+            f"[epoch {epc}/{epochs} | train {train_loss:.4f} | val {val_loss:.4f} \n | val metrics: "
+            + ", ".join([f"{k} {v:.4f}" for k, v in validation_metrics.items()])
         )
 
     return train_loss, val_loss
@@ -128,15 +128,15 @@ def train(
 
 def evaluate_binary_predictions(y_true, y_scores) -> dict:
     """Evaluate binary classification predictions using various metrics."""
-    
+
     y_pred_bin = [1 if p > 0.5 else 0 for p in y_scores]
     return {
-        'roc_auc': roc_auc_score(y_true, y_scores),
-        'pr_auc': average_precision_score(y_true, y_scores),
-        'rec': recall_score(y_true, y_pred_bin),
-        'prec': precision_score(y_true, y_pred_bin),
-        'acc': accuracy_score(y_true, y_pred_bin),
-        'f1': f1_score(y_true, y_pred_bin),
+        "roc_auc": roc_auc_score(y_true, y_scores),
+        "pr_auc": average_precision_score(y_true, y_scores),
+        "rec": recall_score(y_true, y_pred_bin),
+        "prec": precision_score(y_true, y_pred_bin),
+        "acc": accuracy_score(y_true, y_pred_bin),
+        "f1": f1_score(y_true, y_pred_bin),
     }
 
 
@@ -159,7 +159,7 @@ def evaluate(model, test_graphs):
 
 def configurations_random_search(dataset_path: Path, models_config: Path = MODELS):
     """Perform random search over model hyperparameters and save results for a single dataset.
-    
+
     Args:
         dataset_path (Path): Path to dataset pkl file to train on.
         models_config (dict): Model hyperparameter configuration dictionary, containing hyperparameter value options and number of iterations for random search,
@@ -169,18 +169,18 @@ def configurations_random_search(dataset_path: Path, models_config: Path = MODEL
         runs (ModelRun): List of model runs with best model and hyperparameters for each model type.
     """
     ds_name = dataset_path.stem
-    output_dir = models_config['output']
-    iterations = models_config['iterations']
-    best_val_loss = float('inf')
+    output_dir = models_config["output"]
+    iterations = models_config["iterations"]
+    best_val_loss = float("inf")
     best_model = None
     runs = []
     logger.info(f" > Dataset name: {ds_name}")
     graphs = openpkl(dataset_path)
     n_features = graphs[0].x.shape[1]
 
-    for model_name, model_config in models_config['configurations'].items():
-        hp_keys = [k for k in model_config.keys() if k != 'base_class']
-        model_class = model_config['base_class']
+    for model_name, model_config in models_config["configurations"].items():
+        hp_keys = [k for k in model_config.keys() if k != "base_class"]
+        model_class = model_config["base_class"]
         done_iterations = set()
         for i in range(iterations):
             hp = {k: np.random.choice(model_config[k]) for k in hp_keys}
@@ -209,75 +209,101 @@ def configurations_random_search(dataset_path: Path, models_config: Path = MODEL
                 epochs=hp["epochs"],
                 lr=hp["lr"],
                 patience=hp.get("patience", 20),
-                delta=hp.get("delta", 0.001)
+                delta=hp.get("delta", 0.001),
             )
 
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
                 best_model = deepcopy(model)
 
-        save_path = output_dir / model_name / f'{ds_name}_run_{i}.pkl'
-        save_path.mkdir(parents=True, exist_ok=True)
-        logger.info(f"Saving model and results for model [{model_name}] on dataset [{ds_name}] to {save_path}")
+        save_path = output_dir / model_name / f"{ds_name}.pkl"
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        logger.info(
+            f"Saving model and results for model [{model_name}] on dataset [{ds_name}] to {save_path}"
+        )
         run = ModelRun(
             dataset_root=str(dataset_path),
             model=best_model,
             model_configuration=hp,
-            details = {
-                'train_loss': train_loss,
-                'val_loss': val_loss,
-                'best_val_loss': best_val_loss
-            }
+            details={
+                "train_loss": train_loss,
+                "val_loss": val_loss,
+                "best_val_loss": best_val_loss,
+            },
         )
         savepkl(run, save_path)
         runs.append(run)
 
     return runs
-        
+
 
 def evaluate_model_directory(model_directory: Path):
     """Evaluate all models in a directory on their respective test sets and save results."""
 
     for model_file in os.listdir(model_directory):
-        if not model_file.endswith('.pkl'):
+        if not model_file.endswith(".pkl"):
             continue
 
         model_run: ModelRun = openpkl(model_directory / model_file)
         test_graphs = [g for g in openpkl(model_run.dataset_root) if g.test_mask == 1]
-        logger.info(f"Evaluating model {model_file} on test set of dataset {model_run.dataset_root}")
+        logger.info(
+            f"Evaluating model {model_file} on test set of dataset {model_run.dataset_root}"
+        )
         y_scores, metrics = evaluate(model_run.model, test_graphs)
         model_run.test_evaluation = ModelEvaluation(
-            y_pred_test=y_scores,
-            metrics=metrics
+            y_pred_test=y_scores, metrics=metrics
         )
         savepkl(model_run, model_directory / model_file)
 
 
 def main(args):
     if args.evaluate:
-        logger.info(f'running test evals on {args.model_directory}')
+        logger.info(f"running test evals on {args.model_directory}")
         evaluate_model_directory(args.model_directory)
 
     else:
-        logger.info(f'running model optimizations on {args.data_directory}')
-        for ds_name in os.listdir(args.data_directory):
+        datasets = [ds for ds in datasets if ds.endswith(".pkl")]
+        if args.exclude:
+            exclude = set(args.exclude.split(","))
+            datasets = [ds for ds in datasets if ds.split(".")[0] not in exclude]
+        if args.specifically:
+            specifically = args.specifically.split(",")
+            datasets = [ds for ds in datasets if ds.split(".")[0] in specifically]
+
+        logger.info(
+            f"running model optimizations on {args.data_directory} on datasets: {datasets}"
+        )
+
+        for ds_name in datasets:
             dataset_path = args.data_directory / ds_name
-            runs = configurations_random_search(dataset_path)
+            runs = configurations_random_search(
+                dataset_path, specifically=specifically, exclude=exclude
+            )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     import argparse
+
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--data-directory", help="Root directory containing datasets to train on", default=DATASETS['output'] / 'processed'
+        "--data-directory",
+        help="Root directory containing datasets to train on",
+        default=DATASETS["output"] / "processed",
     )
     parser.add_argument(
-        "--model-directory", help="Root directory containing datasets to train on", default=MODELS['output']
+        "--model-directory",
+        help="Root directory containing datasets to train on",
+        default=MODELS["output"],
     )
     parser.add_argument(
-        '-i', '--iterations', default=MODELS['iterations'], type=int, help="number of Hyperparameter random searches"
+        "-e", "--evaluate", action="store_true", help="run evaluation on test set only"
     )
     parser.add_argument(
-        '-e', '--evaluate', action='store_true', help="run evaluation on test set only"
+        "-ex", "--exclude", help="exclude comma seperated datasets (eg -ex delta,echo)"
+    )
+    parser.add_argument(
+        "-sp",
+        "--specifically",
+        help="only train on specified comma seperated datasets (eg -sp delta,echo)",
     )
     main(parser.parse_args())

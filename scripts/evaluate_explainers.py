@@ -43,6 +43,7 @@ def evaluate_GT_edge_mask(
     print(f"ROC AUC: {roc_auc:.5f}, PR AUC: {pr_auc:.5f}")
     return GT_edge_mask, thresholded_mask
 
+
 def main(args):
     dataset_path = Path(args.ds_root)
     dataset = dataset_path.name
@@ -96,7 +97,9 @@ def main(args):
                 test_graphs = openpkl(dataset_path / "test_graphs.pkl")
                 GT_edge_masks = [g.edge_mask for g in test_graphs]
 
-            logger.debug(f"gt.shape for gt in edge_masks {[gt.shape for gt in edge_masks]}")
+            logger.debug(
+                f"gt.shape for gt in edge_masks {[gt.shape for gt in edge_masks]}"
+            )
             logger.debug(
                 f"total values in edge_masks {sum([gt.sum() for gt in edge_masks])}"
             )
@@ -128,7 +131,7 @@ def main(args):
             #     _ = evaluate_GT_edge_mask(GT_edge_masks, edge_masks, threshholder)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "-ds",

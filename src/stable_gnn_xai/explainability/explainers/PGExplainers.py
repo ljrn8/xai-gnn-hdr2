@@ -1,19 +1,14 @@
-from ..explainer_utils import Explainer, elementwise_entropy, uniform_debug_log
-from training.models import GNN
+from ..utils import elementwise_entropy, uniform_debug_log
+from ...interfaces import GNN, GraphLevelExplainer
 import torch
 from torch import Tensor
 import torch.nn as nn
-import random as rand
 from torch_geometric.data import Data
 from tqdm import tqdm
 from collections.abc import Iterable
-import numpy as np
 from loguru import logger
 from torch_geometric.data import Batch
 from abc import ABC, abstractmethod
-from typing import Optional
-import sys
-
 
 
 def parralel_MC_BCE_estimate(
@@ -172,7 +167,7 @@ class GRUExplanationModule(CustomExplanationModule):
         return masks
 
 
-class PGExplainer(Explainer):
+class PGExplainer(GraphLevelExplainer):
     """Standrad PGExplainer Implementation for graph-level binary classification an abritrary explanation module."""
 
     def __init__(
@@ -249,10 +244,4 @@ class PGExplainer(Explainer):
             )
 
         uniform_debug_log(soft_edge_masks)
-        return soft_edge_masks
-
-    def explain_node_task(self, model, graph):
-        raise NotImplementedError()
-    
-
-
+        return soft_edge_masks, loss.item()

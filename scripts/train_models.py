@@ -42,7 +42,9 @@ def main(args):
         n_classes = len(graph.y.unique())
         multiclass = n_classes > 2
 
-    criterion = torch.nn.CrossEntropyLoss() if multiclass else torch.nn.BCEWithLogitsLoss()
+    criterion = (
+        torch.nn.CrossEntropyLoss() if multiclass else torch.nn.BCEWithLogitsLoss()
+    )
 
     for model_name, candidates in model_configs.items():
         best_run: TrainingRun = None
@@ -51,7 +53,9 @@ def main(args):
         for i in range(args.optimization_iterations):
 
             #  HP Optimization (simple random search)
-            total_possible_combintations = np.prod([len(v) for v in candidates.values()])
+            total_possible_combintations = np.prod(
+                [len(v) for v in candidates.values()]
+            )
             if args.optimization_iterations > total_possible_combintations:
                 logger.warning(
                     f"Number of optimization iterations ({args.optimization_iterations}) is greater than the total possible combinations of hyperparameters ({total_possible_combintations}). Consider reducing the number of iterations or increasing the hyperparameter search space to avoid redundant runs."
@@ -114,7 +118,9 @@ def main(args):
                     run.y_true, run.y_pred
                 )
             else:
-                run.val_performance = evaluate_binary_predictions(run.y_true, run.y_pred)
+                run.val_performance = evaluate_binary_predictions(
+                    run.y_true, run.y_pred
+                )
 
             # only keep the model with the best run.performance.f1
             # this ensures realistic sensativity (uncertainty, utilized by explainers) by enforcing the 0.5 threshold, unlike AUC metrics
@@ -143,7 +149,7 @@ def main(args):
             pickle.dump(best_run, f)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--ds-root", help="Root directory containing dataset to evaluate on"

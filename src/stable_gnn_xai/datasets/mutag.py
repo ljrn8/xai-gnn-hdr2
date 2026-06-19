@@ -16,7 +16,6 @@ import numpy as np
 from torch_geometric.datasets import TUDataset
 from pathlib import Path
 
-
 # MUTAG atom type encoding (one-hot column order)
 ATOM_TYPES = ["C", "N", "O", "F", "I", "Cl", "Br"]
 N_IDX = ATOM_TYPES.index("N")  # 1
@@ -25,7 +24,7 @@ O_IDX = ATOM_TYPES.index("O")  # 2
 
 def get_atom_type(node_features: torch.Tensor) -> int:
     """Return the atom index (into ATOM_TYPES) for a one-hot node feature vector."""
-    
+
     return int(node_features.argmax().item())
 
 
@@ -109,11 +108,10 @@ def compute_masks(data) -> tuple[torch.Tensor, torch.Tensor]:
     return node_mask, edge_mask
 
 
-
 def generate_annotated_dataset(data_raw_dir: Path):
     """Compute masks for every graph in the dataset."""
 
-    dataset = TUDataset(root=data_raw_dir / 'raw', name="MUTAG")
+    dataset = TUDataset(root=data_raw_dir / "raw", name="MUTAG")
     print(f"Loaded {len(dataset)} graphs")
     print(f"Classes: {dataset.num_classes}, Node features: {dataset.num_node_features}")
 
@@ -129,10 +127,11 @@ def generate_annotated_dataset(data_raw_dir: Path):
 if __name__ == "__main__":
     from .util import write_graph_iterable
     from ..config import DATASETS, SEED
+
     write_graph_iterable(
-        graphs=generate_annotated_dataset(DATASETS['output'] / 'raw'),
-        destination=DATASETS['output'] / 'processed' / 'mutag.pkl',
+        graphs=generate_annotated_dataset(DATASETS["output"] / "raw"),
+        destination=DATASETS["output"] / "processed" / "mutag.pkl",
         seed=SEED,
-        test_fraction=DATASETS['test_split'],
-        val_fraction=DATASETS['validation_split']
+        test_fraction=DATASETS["test_split"],
+        val_fraction=DATASETS["validation_split"],
     )

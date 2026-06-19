@@ -65,7 +65,7 @@ class WeightedGINConv(MessagePassing):
 
 
 class WeightedNodeGIN(GNN):
-    """GIN model variant that can handle an edge_weight in forward() 
+    """GIN model variant that can handle an edge_weight in forward()
     required for passing fractional subgraph explanations.
     """
 
@@ -163,5 +163,3 @@ class GraphGNNWrapper(GNN):
             return x, embeddings
 
         return x
-
-

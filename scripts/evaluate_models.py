@@ -43,11 +43,10 @@ def main(args):
         logger.info(f"epochs trained: {model_run.epochs_trained}")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--ds-root", help="Root directory containing dataset to evaluate on"
     )
     args = parser.parse_args()
     main(args)
-

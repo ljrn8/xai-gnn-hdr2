@@ -12,7 +12,6 @@ import json
 import pickle as pkl
 from pathlib import Path
 
-
 STANDARD_DATASETS = [
     "delta",
     "echo",
@@ -29,79 +28,103 @@ STANDARD_DATASETS = [
     # "mike",
 ]
 
+
 class OGXBenchmark(InMemoryDataset):
-    """ OpenGraphXAI benchmark datasets. function from Fontanesi et al. (2025)
+    """OpenGraphXAI benchmark datasets. function from Fontanesi et al. (2025)
 
     see https://github.com/OpenGraphXAI/benchmarks
     """
 
-    url = r'https://github.com/OpenGraphXAI/benchmarks/raw/refs/heads/main/data/raw/'
+    url = r"https://github.com/OpenGraphXAI/benchmarks/raw/refs/heads/main/data/raw/"
 
-    def __init__(self,
-                 root: str,
-                 name: str,
-                 split: Optional[str] = None,
-                 transform: Optional[Callable] = None,
-                 pre_transform: Optional[Callable] = None,
-                 pre_filter: Optional[Callable] = None,
-                 force_reload: bool = False):
+    def __init__(
+        self,
+        root: str,
+        name: str,
+        split: Optional[str] = None,
+        transform: Optional[Callable] = None,
+        pre_transform: Optional[Callable] = None,
+        pre_filter: Optional[Callable] = None,
+        force_reload: bool = False,
+    ):
 
-        assert split in ['train', 'val', 'test'] or split is None, f'Unknown split: "{split}"'
+        assert (
+            split in ["train", "val", "test"] or split is None
+        ), f'Unknown split: "{split}"'
 
         self.name_id = name
-        self.name = f'OGX_{self.name_id}'
+        self.name = f"OGX_{self.name_id}"
 
-        super().__init__(root=root, transform=transform, pre_transform=pre_transform, pre_filter=pre_filter,
-                         force_reload=force_reload)
+        super().__init__(
+            root=root,
+            transform=transform,
+            pre_transform=pre_transform,
+            pre_filter=pre_filter,
+            force_reload=force_reload,
+        )
 
-        if split == 'train':
+        if split == "train":
             self.load(self.processed_paths[1])
-        elif split == 'val':
+        elif split == "val":
             self.load(self.processed_paths[2])
-        elif split == 'test':
+        elif split == "test":
             self.load(self.processed_paths[3])
         else:
             self.load(self.processed_paths[0])
 
     def download(self):
         for raw_file in self.raw_file_names:
-            download_url(f'{self.url}{raw_file}', self.raw_dir)
+            download_url(f"{self.url}{raw_file}", self.raw_dir)
 
     @property
     def raw_dir(self) -> str:
-        return os.path.join(self.root, self.name, 'raw')
+        return os.path.join(self.root, self.name, "raw")
 
     @property
     def processed_dir(self) -> str:
-        return os.path.join(self.root, self.name, 'processed')
+        return os.path.join(self.root, self.name, "processed")
 
     @property
     def raw_file_names(self):
-        return [f'{self.name_id}.pkl', f'{self.name_id}_splits.pkl']
+        return [f"{self.name_id}.pkl", f"{self.name_id}_splits.pkl"]
 
     @property
     def processed_file_names(self):
-        return [f'{self.name}.pt'] + [f'{self.name}_{split}.pt' for split in ['train', 'val', 'test']]
+        return [f"{self.name}.pt"] + [
+            f"{self.name}_{split}.pt" for split in ["train", "val", "test"]
+        ]
 
     def process(self):
-        with open(self.raw_paths[0], 'rb') as f:
+        with open(self.raw_paths[0], "rb") as f:
             graphs = pkl.load(f)
 
-        with open(self.raw_paths[1], 'rb') as f:
+        with open(self.raw_paths[1], "rb") as f:
             splits = pkl.load(f)
 
         data_list = []
 
         for class_idx in (0, 1):
-            for graph in graphs[f'class{class_idx}']:
+            for graph in graphs[f"class{class_idx}"]:
                 data = from_networkx(graph)
-                data_list.append(Data(x=data.x,
-                                      edge_index=data.edge_index,
-                                      mask=data.mask if hasattr(data, 'mask') else torch.zeros_like(data.x).bool(),
-                                      mask_root=data.mask_root if hasattr(data, 'mask_root') else torch.zeros_like(data.x).bool(),
-                                      y=torch.tensor([class_idx])))
+                data_list.append(
+                    Data(
+                        x=data.x,
+                        edge_index=data.edge_index,
+                        mask=(
+                            data.mask
+                            if hasattr(data, "mask")
+                            else torch.zeros_like(data.x).bool()
+                        ),
+                        mask_root=(
+                            data.mask_root
+                            if hasattr(data, "mask_root")
+                            else torch.zeros_like(data.x).bool()
+                        ),
+                        y=torch.tensor([class_idx]),
+                    )
+                )
 
-        for i, split in enumerate(['train', 'val', 'test']):
+        for i, split in enumerate(["train", "val", "test"]):
             split_data = [data_list[idx] for idx in splits[0][split]]
             if self.pre_filter is not None:
                 split_data = [data for data in split_data if self.pre_filter(data)]
@@ -118,8 +141,8 @@ class OGXBenchmark(InMemoryDataset):
         self.save(data_list, self.processed_paths[0])
 
     def __repr__(self):
-        return f'{self.name}({len(self)})'
-    
+        return f"{self.name}({len(self)})"
+
 
 def yield_datasets(raw_directory: Path, datasets=STANDARD_DATASETS):
     for ds_name in datasets:
@@ -152,19 +175,18 @@ def yield_datasets(raw_directory: Path, datasets=STANDARD_DATASETS):
 def main():
     from ..config import DATASETS, SEED
     from .util import write_graph_iterable
-    data_dir = Path(DATASETS['output'])
-    for graphs, ds_name in yield_datasets(raw_directory=data_dir / 'raw'):
+
+    data_dir = Path(DATASETS["output"])
+    for graphs, ds_name in yield_datasets(raw_directory=data_dir / "raw"):
         write_graph_iterable(
             graphs=graphs,
-            destination=data_dir / 'processed' / f'{ds_name}.pkl',
+            destination=data_dir / "processed" / f"{ds_name}.pkl",
             seed=SEED,
-            test_fraction=DATASETS['test_split'],
-            val_fraction=DATASETS['validation_split'],
-            overwrite=False
+            test_fraction=DATASETS["test_split"],
+            val_fraction=DATASETS["validation_split"],
+            overwrite=False,
         )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
-
-        

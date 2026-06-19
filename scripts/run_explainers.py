@@ -19,6 +19,7 @@ from ..explainability.utils.explainer_utils import Explainer
 # seperate args for each explainer
 # evaluate explainers for different HPOs (high PGE variance)
 
+
 class RandomExplainer(Explainer):
     """Random edge mask generator for benchmarking"""
 
@@ -46,7 +47,7 @@ def main(args):
     logger.info(f"\n\n Dataset name: {dataset} \n")
     runs = {model: openpkl(models_path / model) for model in os.listdir(models_path)}
 
-    logger.info(f'total graphs in test set: {len(test_graphs)}')
+    logger.info(f"total graphs in test set: {len(test_graphs)}")
 
     for model_name, run in runs.items():
         model = run.task.model
@@ -63,14 +64,14 @@ def main(args):
 
         explainer_map = {
             "Random Explainer": RandomExplainer(graphs=test_graphs),
-            'GNNExplainer': GNNExplainer(
+            "GNNExplainer": GNNExplainer(
                 model=model,
                 graphs=test_graphs,
                 epochs=args.epochs,
-                lr=0.05, # !!!
+                lr=0.05,  # !!!
                 mean_regularization=0.1,
                 entropy_regularization=0.05,
-            )
+            ),
         }
         for pge_module in (
             PGEExplanationModule,
@@ -85,7 +86,9 @@ def main(args):
                 tau=0.3,
                 reparameterization_samples=30,
                 explanation_module=pge_module(
-                    graphs=test_graphs, model=run.task.model, hidden_size=args.hidden_size
+                    graphs=test_graphs,
+                    model=run.task.model,
+                    hidden_size=args.hidden_size,
                 ),
             )
 
@@ -94,7 +97,9 @@ def main(args):
 
         for explainer_name, expl in explainer_map.items():
             model_name = model_name.split(".pkl")[0]
-            logger.info(f"Explaining model: {model_name} with explainer: {explainer_name} ")
+            logger.info(
+                f"Explaining model: {model_name} with explainer: {explainer_name} "
+            )
 
             if args.graph_level:
                 masks = expl.explain_graph_task()
@@ -110,7 +115,7 @@ def main(args):
                 pickle.dump(explanation, f)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "-ds",
@@ -119,10 +124,10 @@ if __name__ == '__main__':
         required=True,
     )
     parser.add_argument("-n", "--node-level", action="store_true")
-    parser.add_argument("-g", "--graph-level", action="store_true", help='(default)')
-    parser.add_argument("-e", "--epochs", type=int,             default=300)
-    parser.add_argument("-lr", "--learning-rate", type=float,   default=0.01)
-    parser.add_argument("--hidden-size", type=int,              default=64)
+    parser.add_argument("-g", "--graph-level", action="store_true", help="(default)")
+    parser.add_argument("-e", "--epochs", type=int, default=300)
+    parser.add_argument("-lr", "--learning-rate", type=float, default=0.01)
+    parser.add_argument("--hidden-size", type=int, default=64)
     parser.add_argument(
         "--explainer",
         type=str,

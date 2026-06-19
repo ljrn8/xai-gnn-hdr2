@@ -69,24 +69,21 @@ def _build_treecircles(
     return graphs
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     from .util import write_graph_iterable
     from ..config import DATASETS, SEED
 
-    data_dir = Path(DATASETS['output'])
-    raw_ba2 = BA2MotifDataset(root=data_dir / 'raw')
+    data_dir = Path(DATASETS["output"])
+    raw_ba2 = BA2MotifDataset(root=data_dir / "raw")
     ba2_graphs = [_ba2motif_gt_masks(raw_ba2[i]) for i in range(len(raw_ba2))]
     tc_graphs = _build_treecircles(n_per_class=500, tree_depth=4, seed=SEED)
 
-    for name, graphs in (
-        ('ba2_graphs', ba2_graphs),
-        ('tc_graphs', tc_graphs)
-    ):
+    for name, graphs in (("ba2_graphs", ba2_graphs), ("tc_graphs", tc_graphs)):
         write_graph_iterable(
             graphs=graphs,
-            destination= data_dir / 'processed' / f'{name}.pkl',
+            destination=data_dir / "processed" / f"{name}.pkl",
             overwrite=False,
             seed=SEED,
-            test_fraction=DATASETS['test_split'],
-            val_fraction=DATASETS['validation_split']
+            test_fraction=DATASETS["test_split"],
+            val_fraction=DATASETS["validation_split"],
         )
