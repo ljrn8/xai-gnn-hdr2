@@ -178,7 +178,7 @@ def configurations_random_search(dataset_path: Path, models_config: Path = MODEL
     graphs = openpkl(dataset_path)
     n_features = graphs[0].x.shape[1]
 
-    for model_name, model_config in models_config["exhuastive_search_configurations"].items():
+    for model_name, model_config in models_config["random_search_configurations"].items():
         hyperparameter_config = model_config['hyperparameters']
         hp_keys = [k for k in hyperparameter_config.keys() if k != "base_class"]
         model_class = model_config["base_class"]
