@@ -279,7 +279,7 @@ def main(args):
         for ds_name in datasets:
             dataset_path = args.data_directory / ds_name
             runs = configurations_random_search(
-                dataset_path, specifically=specifically, exclude=exclude
+                dataset_path
             )
 
 
