@@ -172,15 +172,20 @@ class PGExplainer(GraphLevelExplainer):
 
     def __init__(
         self,
+        model: GNN,
+        graphs: Iterable[Data],
+        hidden_size,
         epochs,
         lr,
         mean_regularization,
         entropy_regularization,
         tau,
         reparameterization_samples,
-        explanation_module: CustomExplanationModule,
+        explanation_module_class: CustomExplanationModule = PGEExplanationModule,
         loss_f=torch.nn.BCELoss(),
     ):
+        super().__init__(model, graphs)
+        self.hidden_size = hidden_size
         self.epochs = epochs
         self.lr = lr
         self.mean_regularization = mean_regularization
@@ -188,7 +193,9 @@ class PGExplainer(GraphLevelExplainer):
         self.tau = tau
         self.reparameterization_samples = reparameterization_samples
         self.loss_f = loss_f
-        self.explanation_module = explanation_module
+        self.explanation_module = explanation_module_class(
+            model=model, graphs=graphs, hidden_size=hidden_size
+        )
 
     def explain_graph_task(self):
         model, graphs = self.explanation_module.model, self.explanation_module.graphs

@@ -1,5 +1,10 @@
 from .training.models import WeightedNodeGCN, WeightedNodeGIN
-from .explainability.explainers.PGExplainers import PGExplainer
+from .explainability.explainers.PGExplainers import (
+    PGExplainer, 
+    PGEExplanationModule,
+    ComprehensiveMLPExplanationModule, 
+    GRUExplanationModule
+)
 from .explainability.explainers.RandomExplainer import RandomExplainer
 from .explainability.explainers.GNNExplainer import GNNExplainer
 from pathlib import Path
@@ -16,35 +21,74 @@ MODELS = {
     "random_search_configurations": {
         "GCN": {
             "base_class": WeightedNodeGCN,
-            "lr": [0.0005, 0.0003, 0.001],
-            "epochs": [100, 300, 400, 200],
-            "hidden_channels": [32, 64],
-            "num_layers": [1, 2, 3],
+            'hyperparameters': {
+                "lr": [0.0005, 0.0003, 0.001],
+                "epochs": [100, 300, 400, 200],
+                "hidden_channels": [32, 64],
+                "num_layers": [1, 2, 3],
+            }
         },
         "GIN": {
             "base_class": WeightedNodeGIN,
-            "lr": [0.001, 0.0005, 0.0003],
-            "epochs": [200, 500],
-            "hidden_channels": [32, 64],
-            "num_layers": [2, 3, 4, 5, 6],
+            'hyperparameters': {
+                 "lr": [0.001, 0.0005, 0.0003],
+                "epochs": [200, 500],
+                "hidden_channels": [32, 64],
+                "num_layers": [2, 3, 4, 5, 6],
+            }
         },
     },
 }
 
 EXPLAINERS = {
-    "output_directory": Path("output/explanations"), 
+    "output": Path("output/explanations"), 
     "exhuastive_search_configurations": {
         'PGE': {
             'class': PGExplainer,
-            'learning_rate': [0.01, 0.05, 0.1],
-            'hidden_size': [64, 64, 32],
-            'epochs': [300, 200, 100],
+            'hyperparameters': {
+                'tau': [0.5]*3,
+                'reparameterization_samples': [30]*3,
+                'lr': [0.01, 0.05, 0.1],
+                'hidden_size': [64, 64, 32],
+                'epochs': [300, 200, 100],
+                'entropy_regularization': [0.1, 0.1, 0.1],
+                'mean_regularization': [0.1, 0.1, 0.1],
+            }
+        },
+        'PGE-ComprehensiveGRU': {
+            'class': PGExplainer,
+            'hyperparameters': {
+                'tau': [0.5]*3,
+                'reparameterization_samples': [30]*3,
+                'explanation_module_class': [GRUExplanationModule]*3,
+                'lr': [0.01, 0.05, 0.1],
+                'hidden_size': [64, 64, 32],
+                'epochs': [300, 200, 100],
+                'entropy_regularization': [0.1, 0.1, 0.1],
+                'mean_regularization': [0.1, 0.1, 0.1],
+            }
+        },
+        'PGE-ComprehensiveMLP': {
+            'class': PGExplainer,
+            'hyperparameters': {
+                'tau': [0.5]*3,
+                'reparameterization_samples': [30]*3,
+                'explanation_module_class': [ComprehensiveMLPExplanationModule]*3,
+                'lr': [0.01, 0.05, 0.1],
+                'hidden_size': [64, 64, 32],
+                'epochs': [300, 200, 100],
+                'entropy_regularization': [0.1, 0.1, 0.1],
+                'mean_regularization': [0.1, 0.1, 0.1],
+            }
+            
         },
         'GNNExplainer': {
             'class': GNNExplainer,
-            'learning_rate': [0.01, 0.05, 0.1],
-            'hidden_size': [64, 64, 32],
-            'epochs': [300, 200, 100],
+            'hyperparameters': {
+                'lr': [0.01, 0.05, 0.1],
+                'hidden_size': [64, 64, 32],
+                'epochs': [300, 200, 100],
+            }
         },
         'Random Explainer': {
             'class': RandomExplainer

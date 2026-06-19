@@ -1,4 +1,4 @@
-from ..utils import Explainer, elementwise_entropy, uniform_debug_log
+from ..utils import elementwise_entropy, uniform_debug_log
 from ...interfaces import GNN, GraphLevelExplainer
 from torch_geometric.data import Data
 from typing_extensions import Iterable

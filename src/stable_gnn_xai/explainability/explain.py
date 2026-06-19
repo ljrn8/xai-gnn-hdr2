@@ -34,8 +34,6 @@ def run_explainers_from_config(
     model = model_run.model
     dataset = Path(model_run.dataset_root).stem
 
-    output_path.mkdir(exist_ok=True, parents=True)
-
     logger.info(f"\n\n Dataset name: {dataset} \n")
     logger.info(f"total graphs in test set: {len(test_graphs)}")
     logger.info("passing a test graph for embedding dimensions etc")
@@ -52,15 +50,18 @@ def run_explainers_from_config(
 
     # Exhuastive explainer configuration search loop
     for explainer_name, explainer_config in explainers_search.items():
+        hyperparameters_config = explainer_config['hyperparameters']
         expl_class = explainer_config['class']
-        explainer_config.remove('class')
-        n_configurations = len(explainer_config[explainer_config.keys()[0]])
+        explainer_config = {k: v for k, v in hyperparameters_config.items() if k != 'class'}
+        hp_names = list(hyperparameters_config.keys())
+        n_configurations = len(hyperparameters_config[hp_names[0]])
         best_penalty = float('inf')
+
         for config_idx in range(n_configurations):
-            explainer = explainer_config['class'](
+            explainer = expl_class(
                 model=model, 
                 graphs=test_graphs, 
-                **{k: explainer_config[k][config_idx] for k in explainer_config.keys() if k != 'class'}
+                **{k: hyperparameters_config[k][config_idx] for k in hyperparameters_config.keys() if k != 'class'}
             )
             masks, final_objective_loss = explainer.explain_graph_task()
             if final_objective_loss < best_penalty:
@@ -75,6 +76,7 @@ def run_explainers_from_config(
             evaluate_explanation(masks, GT_test_edge_masks, figures_id = f"{dataset}_{explainer_name}_{config_idx}")
 
         best_explanation.evaluation_metrics['roc_auc'] = evaluate_explanation(best_explanation.edge_mask, GT_test_edge_masks)
+        output_path.mkdir(exist_ok=True, parents=True)
         savepkl(best_explanation, output_path / f"{explainer_name}.pkl")
 
 
@@ -106,17 +108,21 @@ def main(args):
     if args.model_run_path:
         logger.info(f"explaining specific model run at path: {args.model_run_path}")
         model_run = openpkl(args.model_run_path)
-        model = model_run.path.parent
-        run_explainers_from_config(model_run, output_path = EXPLAINERS['output'] / model)
+        model_name = Path(args.model_run_path).parent
+        dataset_name = Path(model_run.dataset_root).stem
+        run_explainers_from_config(model_run, output_path = EXPLAINERS['output'] / model_name / dataset_name)
 
     else:
-        files = os.listdir(MODELS['output'])
-        logger.info(f"found {len(files)} model runs to explain")
-        for model_run_file in files:
-            model_run = openpkl(MODELS['output'] / model_run_file)
-            model = model_run.path.parent
-            run_explainers_from_config(model_run, output_path = EXPLAINERS['output'] / model)
-
+        root = MODELS['output']
+        model_directories = os.listdir(root)
+        for model_name in model_directories:
+            run_names = os.listdir(root / model_name)
+            logger.info(f"found {run_names} model runs to explain")
+            for model_run_file in os.listdir(run_names):
+                model_run = openpkl(root / model_name / model_run_file)
+                dataset_name = Path(model_run.dataset_root).stem
+                run_explainers_from_config(model_run, 
+                                           output_path = EXPLAINERS['output'] / model_name / dataset_name)
 
 if __name__ == "__main__":
     from argparse import ArgumentParser
