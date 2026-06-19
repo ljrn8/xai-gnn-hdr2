@@ -178,12 +178,13 @@ def configurations_random_search(dataset_path: Path, models_config: Path = MODEL
     graphs = openpkl(dataset_path)
     n_features = graphs[0].x.shape[1]
 
-    for model_name, model_config in models_config["configurations"].items():
-        hp_keys = [k for k in model_config.keys() if k != "base_class"]
+    for model_name, model_config in models_config["exhuastive_search_configurations"].items():
+        hyperparameter_config = model_config['hyperparameters']
+        hp_keys = [k for k in hyperparameter_config.keys() if k != "base_class"]
         model_class = model_config["base_class"]
         done_iterations = set()
         for i in range(iterations):
-            hp = {k: np.random.choice(model_config[k]) for k in hp_keys}
+            hp = {k: np.random.choice(hyperparameter_config[k]) for k in hp_keys}
             if tuple(hp.items()) in done_iterations:
                 continue
 
@@ -262,6 +263,7 @@ def main(args):
         evaluate_model_directory(args.model_directory)
 
     else:
+        datasets = os.listdir(args.data_directory)
         datasets = [ds for ds in datasets if ds.endswith(".pkl")]
         if args.exclude:
             exclude = set(args.exclude.split(","))

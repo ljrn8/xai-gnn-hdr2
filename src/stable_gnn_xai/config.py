@@ -40,6 +40,8 @@ MODELS = {
     },
 }
 
+# TODO: generate lists of partial functions instead
+
 EXPLAINERS = {
     "output": Path("output/explanations"), 
     "exhuastive_search_configurations": {

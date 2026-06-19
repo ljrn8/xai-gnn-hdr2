@@ -108,21 +108,23 @@ def main(args):
     if args.model_run_path:
         logger.info(f"explaining specific model run at path: {args.model_run_path}")
         model_run = openpkl(args.model_run_path)
-        model_name = Path(args.model_run_path).parent
+        model_name = Path(args.model_run_path).parent.name
         dataset_name = Path(model_run.dataset_root).stem
         run_explainers_from_config(model_run, output_path = EXPLAINERS['output'] / model_name / dataset_name)
 
     else:
         root = MODELS['output']
-        model_directories = os.listdir(root)
-        for model_name in model_directories:
+        model_names = os.listdir(root)
+
+        for model_name in model_names:
             run_names = os.listdir(root / model_name)
             logger.info(f"found {run_names} model runs to explain")
             for model_run_file in os.listdir(run_names):
                 model_run = openpkl(root / model_name / model_run_file)
-                dataset_name = Path(model_run.dataset_root).stem
-                run_explainers_from_config(model_run, 
-                                           output_path = EXPLAINERS['output'] / model_name / dataset_name)
+                dataset_name = Path(model_run.dataset_root)
+                run_explainers_from_config(
+                    model_run, 
+                    output_path = EXPLAINERS['output'] / model_name / dataset_name)
 
 if __name__ == "__main__":
     from argparse import ArgumentParser
