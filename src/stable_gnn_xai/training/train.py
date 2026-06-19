@@ -119,8 +119,7 @@ def train(
             best_epoch = epc
 
         pbar.set_description(
-            f"[epoch {epc}/{epochs} | train {train_loss:.4f} | val {val_loss:.4f} \n | val metrics: "
-            + ", ".join([f"{k} {v:.4f}" for k, v in validation_metrics.items()])
+            f"Epoch {epc}/{epochs}: train_l={train_loss:.4f} val_l={val_loss:.4f} val_f1={validation_metrics['f1']:.4f}" 
         )
 
     return train_loss, val_loss
@@ -278,9 +277,7 @@ def main(args):
 
         for ds_name in datasets:
             dataset_path = args.data_directory / ds_name
-            runs = configurations_random_search(
-                dataset_path
-            )
+            runs = configurations_random_search(dataset_path)
 
 
 if __name__ == "__main__":
