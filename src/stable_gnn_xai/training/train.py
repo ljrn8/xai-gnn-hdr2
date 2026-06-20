@@ -18,10 +18,9 @@ from torch_geometric.data import Data
 from pathlib import Path
 import os
 from ..interfaces import GNN, ModelRun, ModelEvaluation
-from ..config import MODELS, DATASETS, SEED
+from ..config import MODELS, DATASETS, SEED, DEVICE
 from ..util import openpkl, savepkl
 from .models import GraphGNNWrapper
-
 
 def _run_graphs(graphs: Iterable[Data], model: GNN, criterion, optimizer=None):
     """Run a training or evaluation loop over a set of graphs.
@@ -35,11 +34,13 @@ def _run_graphs(graphs: Iterable[Data], model: GNN, criterion, optimizer=None):
     ctx = torch.enable_grad() if training else torch.no_grad()
     with ctx:
         for G in graphs:
-            if training:
-                optimizer.zero_grad()
+            G = G.to(DEVICE)
 
             if G.x.dim() == 1:
                 G.x = G.x.unsqueeze(1)
+
+            if training:
+                optimizer.zero_grad()
 
             logit = model(G.x, G.edge_index).view(-1)
             y = G.y.float().view(-1)
@@ -146,7 +147,8 @@ def summarize_metrics(metrics_dict):
 
 def evaluate(model, test_graphs):
     """Evaluate a trained model on test graphs."""
-
+    
+    model = model.to(DEVICE)
     model.eval()
     test_loss, y_true, y_scores = _run_graphs(
         graphs=test_graphs, model=model, criterion=nn.BCEWithLogitsLoss()
@@ -206,7 +208,7 @@ def configurations_random_search(dataset_path: Path, models_config: Path = MODEL
                 ),
                 incoming_channels=hp["hidden_channels"],
                 output_graph_channels=1,
-            )
+            ).to(DEVICE)
 
             logger.info(f"model: {model}")
 

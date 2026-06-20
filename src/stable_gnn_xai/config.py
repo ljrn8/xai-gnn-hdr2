@@ -8,6 +8,11 @@ from .explainability.explainers.PGExplainers import (
 from .explainability.explainers.RandomExplainer import RandomExplainer
 from .explainability.explainers.GNNExplainer import GNNExplainer
 from pathlib import Path
+import torch
+from loguru import logger
+
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+logger.info(f"Using device: {DEVICE}")
 
 SEED = 0
 
@@ -39,8 +44,6 @@ MODELS = {
         },
     },
 }
-
-# TODO: generate lists of partial functions instead?
 
 EXPLAINERS = {
     "output": Path("output/explanations"), 

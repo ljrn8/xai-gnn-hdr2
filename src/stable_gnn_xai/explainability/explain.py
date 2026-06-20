@@ -7,7 +7,7 @@ from loguru import logger
 from pathlib import Path
 from ..interfaces import GNN, Explanation, ModelRun
 from ..util import openpkl, savepkl
-from ..config import EXPLAINERS, MODELS, FIGURES
+from ..config import EXPLAINERS, MODELS, FIGURES, DEVICE
 from typing_extensions import Iterable
 import matplotlib.pyplot as plt
 
@@ -30,6 +30,8 @@ def run_explainers_from_config(
     test_graphs = [g for g in graphs if g.test_mask == 1]
     G = test_graphs[0]
     model = model_run.model
+    model = model_run.model.to(DEVICE)
+    test_graphs = [g.to(DEVICE) for g in test_graphs]
     dataset = Path(model_run.dataset_root).stem
 
     logger.info(f"\n\n Dataset name: {dataset} \n")
@@ -85,10 +87,6 @@ def evaluate_explanation(edge_masks: Iterable[torch.Tensor], GT_edge_masks: Iter
     Returns:
         roc_auc (float)
     """
-    edge_masks = edge_masks
-    edge_masks = edge_masks.view(-1)
-    GT_edge_masks = GT_edge_masks.view(-1)
-
     from sklearn.metrics import roc_auc_score
     roc_auc = roc_auc_score(GT_edge_masks.cpu(), edge_masks.cpu())
     logger.info(f"ROC AUC of explanation: {roc_auc:.4f}")
