@@ -156,7 +156,7 @@ def evaluate(model, test_graphs):
     return y_scores, metrics
 
 
-def configurations_random_search(dataset_path: Path, models_config: Path = MODELS):
+def configurations_random_search(dataset_path: Path, models_config: Path = MODELS, overwrite: bool = False):
     """Perform random search over model hyperparameters and save results for a single dataset.
 
     Args:
@@ -182,6 +182,14 @@ def configurations_random_search(dataset_path: Path, models_config: Path = MODEL
         hp_keys = [k for k in hyperparameter_config.keys() if k != "base_class"]
         model_class = model_config["base_class"]
         done_iterations = set()
+        
+        save_path = output_dir / model_name / f"{ds_name}.pkl"
+        if save_path.exists() and not overwrite:
+            logger.info(f"Model run already exists for model [{model_name}] on dataset [{ds_name}] at {save_path}, skipping...")
+            run = openpkl(save_path)
+            runs.append(run)
+            continue
+
         for i in range(iterations):
             hp = {k: np.random.choice(hyperparameter_config[k]) for k in hp_keys}
             if tuple(hp.items()) in done_iterations:
@@ -216,7 +224,7 @@ def configurations_random_search(dataset_path: Path, models_config: Path = MODEL
                 best_val_loss = val_loss
                 best_model = deepcopy(model)
 
-        save_path = output_dir / model_name / f"{ds_name}.pkl"
+        
         save_path.parent.mkdir(parents=True, exist_ok=True)
         logger.info(
             f"Saving model and results for model [{model_name}] on dataset [{ds_name}] to {save_path}"
@@ -259,7 +267,7 @@ def evaluate_model_directory(model_directory: Path):
 def main(args):
     if args.evaluate:
         logger.info(f"running test evals on {args.model_directory}")
-        evaluate_model_directory(args.model_directory)
+        evaluate_model_directory(args.model_directory, overwrite=args.overwrite)
 
     else:
         datasets = os.listdir(args.data_directory)
@@ -277,7 +285,7 @@ def main(args):
 
         for ds_name in datasets:
             dataset_path = args.data_directory / ds_name
-            runs = configurations_random_search(dataset_path)
+            runs = configurations_random_search(dataset_path, overwrite=args.overwrite)
 
 
 if __name__ == "__main__":
@@ -296,6 +304,9 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "-e", "--evaluate", action="store_true", help="run evaluation on test set only"
+    )
+    parser.add_argument(
+        "-o", "--overwrite", action="store_true", help="overwrite pkl model runs (redo all)"
     )
     parser.add_argument(
         "-ex", "--exclude", help="exclude comma seperated datasets (eg -ex delta,echo)"

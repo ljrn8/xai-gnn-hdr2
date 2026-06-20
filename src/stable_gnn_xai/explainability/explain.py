@@ -21,10 +21,8 @@ def run_explainers_from_config(
     """Applies, optimizes and saves all explainers specified in explainers_search towards the model run 
     
     Produces:
-        [output_explainer_directory]/
-            [dataset_name]/
-                [model_name]/
-                    [explainer_name].pkl
+        [output_path]/
+            [explainer_name].pkl
     """
     graphs = openpkl(model_run.dataset_root)
     GT_test_edge_masks = [g.edge_mask for g in graphs if g.test_mask == 1]
@@ -50,6 +48,7 @@ def run_explainers_from_config(
 
     # Exhuastive explainer configuration search loop
     for explainer_name, explainer_config in explainers_search.items():
+        logger.info(f'EXPLAINER: {explainer_name}')
         hyperparameters_config = explainer_config['hyperparameters']
         expl_class = explainer_config['class']
         explainer_config = {k: v for k, v in hyperparameters_config.items() if k != 'class'}
@@ -106,11 +105,14 @@ def evaluate_explanation(edge_masks: Iterable[torch.Tensor], GT_edge_masks: Iter
 
 def main(args):
     if args.model_run_path:
-        logger.info(f"explaining specific model run at path: {args.model_run_path}")
         model_run = openpkl(args.model_run_path)
         model_name = Path(args.model_run_path).parent.name
         dataset_name = Path(model_run.dataset_root).stem
-        run_explainers_from_config(model_run, output_path = EXPLAINERS['output'] / model_name / dataset_name)
+
+        logger.info(f"\n --> explaining specific model run at path: {args.model_run_path} \n")
+        run_explainers_from_config(
+            model_run, 
+            output_path = EXPLAINERS['output'] / model_name / dataset_name)
 
     else:
         root = MODELS['output']
@@ -119,9 +121,12 @@ def main(args):
         for model_name in model_names:
             run_names = os.listdir(root / model_name)
             logger.info(f"found {run_names} model runs to explain")
-            for model_run_file in os.listdir(run_names):
+
+            for model_run_file in run_names:
                 model_run = openpkl(root / model_name / model_run_file)
-                dataset_name = Path(model_run.dataset_root)
+                dataset_name = Path(model_run_file).stem
+
+                logger.info(f"\n --> explaining model [{model_name}] for dataset [{dataset_name}]\n")
                 run_explainers_from_config(
                     model_run, 
                     output_path = EXPLAINERS['output'] / model_name / dataset_name)
@@ -130,5 +135,9 @@ def main(args):
 if __name__ == "__main__":
     from argparse import ArgumentParser
     parser = ArgumentParser()
-    parser.add_argument('-m', '--model-run-path', help='specific model run to explain, as a path to a pkl file')
+    parser.add_argument(
+        '-m', 
+        '--model-run-path', 
+        help='specific model run to explain (expects [some_path]/[model_name]/[dataset_name].pkl), as a path to the ModelRun pkl file'
+    )
     main(parser.parse_args())

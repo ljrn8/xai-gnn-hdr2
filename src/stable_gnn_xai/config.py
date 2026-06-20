@@ -40,7 +40,7 @@ MODELS = {
     },
 }
 
-# TODO: generate lists of partial functions instead
+# TODO: generate lists of partial functions instead?
 
 EXPLAINERS = {
     "output": Path("output/explanations"), 
