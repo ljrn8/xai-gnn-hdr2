@@ -21,29 +21,31 @@ from ..interfaces import GNN, ModelRun, ModelEvaluation
 from ..config import MODELS, DATASETS, SEED, DEVICE
 from ..util import openpkl, savepkl
 from .models import GraphGNNWrapper
+from torch_geometric.loader import DataLoader
 
-def _run_graphs(graphs: Iterable[Data], model: GNN, criterion, optimizer=None):
-    """Run a training or evaluation loop over a set of graphs.
-    Training is performed if an optimizer is provided, otherwise evaluation is performed.
-    """
+
+def _run_graphs(graphs, model, criterion, optimizer=None, batch_size=64):
     training = optimizer is not None
     model.train() if training else model.eval()
+    for g in graphs:
+        g.edge_attr = None
 
+    loader = DataLoader(graphs, batch_size=batch_size, shuffle=training)
     total_loss = 0.0
     y_true, y_scores = [], []
+
     ctx = torch.enable_grad() if training else torch.no_grad()
     with ctx:
-        for G in graphs:
-            G = G.to(DEVICE)
-
-            if G.x.dim() == 1:
-                G.x = G.x.unsqueeze(1)
+        for batch in loader:
+            batch = batch.to(DEVICE)
+            if batch.x.dim() == 1:
+                batch.x = batch.x.unsqueeze(1)
 
             if training:
                 optimizer.zero_grad()
 
-            logit = model(G.x, G.edge_index).view(-1)
-            y = G.y.float().view(-1)
+            logit = model(batch.x, batch.edge_index, batch=batch.batch).view(-1)
+            y = batch.y.float().view(-1)
             loss = criterion(logit, y)
 
             if training:
@@ -51,11 +53,10 @@ def _run_graphs(graphs: Iterable[Data], model: GNN, criterion, optimizer=None):
                 optimizer.step()
 
             total_loss += loss.item()
-            prob = torch.sigmoid(logit)
+            y_scores.extend(torch.sigmoid(logit).detach().cpu().tolist())
             y_true.extend(y.cpu().tolist())
-            y_scores.extend(prob.detach().cpu().tolist())
 
-    return total_loss / len(graphs), y_true, y_scores
+    return total_loss / len(loader), y_true, y_scores
 
 
 def train(
@@ -269,7 +270,7 @@ def evaluate_model_directory(model_directory: Path):
 def main(args):
     if args.evaluate:
         logger.info(f"running test evals on {args.model_directory}")
-        evaluate_model_directory(args.model_directory, overwrite=args.overwrite)
+        evaluate_model_directory(args.model_directory)
 
     else:
         datasets = os.listdir(args.data_directory)

@@ -6,6 +6,7 @@ import torch
 from tqdm import tqdm
 from loguru import logger
 
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class GNNExplainer(GraphLevelExplainer):
     """Classic GNNExplainer Implementation for binary graph classifiers (does not include feature extractor)"""
@@ -23,7 +24,7 @@ class GNNExplainer(GraphLevelExplainer):
         for p in model.parameters():
             p.requires_grad_(False)
 
-        self.model = model
+        self.model = model.to(DEVICE)
         self.graphs = graphs
         self.epochs = epochs
         self.lr = lr
@@ -35,16 +36,20 @@ class GNNExplainer(GraphLevelExplainer):
         logger.info(f"GNNE About to sequentially fit {len(self.graphs)} graphs")
         pbar = tqdm(self.graphs)
         masks = []
+
+        # TODO: batch this for GPU
         for i, G in enumerate(pbar):
             num_edges = G.edge_index.size(1)
-            parameterized_edge_mask = torch.nn.Parameter(torch.randn(num_edges) * 0.1)
+            parameterized_edge_mask = torch.nn.Parameter(torch.randn(num_edges).to(DEVICE) * 0.1)
+            optimizer = torch.optim.Adam([parameterized_edge_mask], lr=self.lr)
+
             original_y_pred = (
                 self.model.forward(G.x, G.edge_index).detach().view(-1).sigmoid()
             )
-            optimizer = torch.optim.Adam([parameterized_edge_mask], lr=self.lr)
+            
             for epoch in range(1, self.epochs + 1):
-                edge_mask = parameterized_edge_mask.sigmoid()
                 optimizer.zero_grad()
+                edge_mask = parameterized_edge_mask.sigmoid()
                 explanatatory_y_preds = (
                     self.model.forward(G.x, G.edge_index, edge_weight=edge_mask)
                     .view(-1)

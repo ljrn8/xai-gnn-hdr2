@@ -58,6 +58,7 @@ class ModelRun:
 
 @dataclass
 class Explanation:
+    name: str
     explainer: GraphLevelExplainer
     run: ModelRun
     task_type: Optional[str] = None

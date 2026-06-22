@@ -175,9 +175,11 @@ def yield_datasets(raw_directory: Path, datasets=STANDARD_DATASETS):
 def main():
     from ..config import DATASETS, SEED
     from .util import write_graph_iterable
-
     data_dir = Path(DATASETS["output"])
-    for graphs, ds_name in yield_datasets(raw_directory=data_dir / "raw"):
+    (data_dir / 'processed').mkdir(exist_ok=True, parents=True)
+    (data_dir / 'raw').mkdir(exist_ok=True, parents=True)
+
+    for graphs, ds_name in yield_datasets(raw_directory=Path(DATASETS['output'] / "raw")):
         write_graph_iterable(
             graphs=graphs,
             destination=data_dir / "processed" / f"{ds_name}.pkl",

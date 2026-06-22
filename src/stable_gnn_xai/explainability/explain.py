@@ -11,12 +11,12 @@ from ..config import EXPLAINERS, MODELS, FIGURES, DEVICE
 from typing_extensions import Iterable
 import matplotlib.pyplot as plt
 
-torch.autograd.set_detect_anomaly(True, check_nan=False)
 
 def run_explainers_from_config(
         model_run: ModelRun, 
         output_path: Path, 
-        explainers_search: dict = EXPLAINERS['exhuastive_search_configurations']
+        explainers_search: dict = EXPLAINERS['exhuastive_search_configurations'],
+        specify_explainer: str = None
 ):
     """Applies, optimizes and saves all explainers specified in explainers_search towards the model run 
     
@@ -28,10 +28,13 @@ def run_explainers_from_config(
     GT_test_edge_masks = [g.edge_mask for g in graphs if g.test_mask == 1]
 
     test_graphs = [g for g in graphs if g.test_mask == 1]
-    G = test_graphs[0]
     model = model_run.model
+    
+    logger.info(f'moving model and graphs to {DEVICE}')
     model = model_run.model.to(DEVICE)
     test_graphs = [g.to(DEVICE) for g in test_graphs]
+    logger.info('done')
+    
     dataset = Path(model_run.dataset_root).stem
 
     logger.info(f"\n\n Dataset name: {dataset} \n")
@@ -50,10 +53,13 @@ def run_explainers_from_config(
 
     # Exhuastive explainer configuration search loop
     for explainer_name, explainer_config in explainers_search.items():
+        if specify_explainer and explainer_name != specify_explainer:
+            logger.info(f'skipping {explainer_name} as unspecified explainer')
+            continue
+
         logger.info(f'EXPLAINER: {explainer_name}')
         hyperparameters_config = explainer_config['hyperparameters']
         expl_class = explainer_config['class']
-        explainer_config = {k: v for k, v in hyperparameters_config.items() if k != 'class'}
         hp_names = list(hyperparameters_config.keys())
         n_configurations = len(hyperparameters_config[hp_names[0]])
         best_penalty = float('inf')
@@ -72,36 +78,48 @@ def run_explainers_from_config(
                     run=model_run,
                     task_type='graph',
                     edge_masks=masks,
+                    name=explainer_name
                 )
 
-            evaluate_explanation(masks, GT_test_edge_masks, figures_id = f"{dataset}_{explainer_name}_{config_idx}")
+            evaluate_explanation(masks, GT_test_edge_masks, figures_id=f"{dataset}_{explainer_name}_{config_idx}")
 
-        best_explanation.evaluation_metrics['roc_auc'] = evaluate_explanation(best_explanation.edge_mask, GT_test_edge_masks)
+        best_explanation.evaluation_metrics['roc_auc'] = evaluate_explanation(
+            best_explanation.edge_masks, GT_test_edge_masks, figures_id=f"{dataset}_{explainer_name}_best"
+        )
         output_path.mkdir(exist_ok=True, parents=True)
         savepkl(best_explanation, output_path / f"{explainer_name}.pkl")
 
 
-def evaluate_explanation(edge_masks: Iterable[torch.Tensor], GT_edge_masks: Iterable[torch.Tensor], figures_id, figures_dir = FIGURES / 'explanations'):
-    """"Evaluates per-sparsity level fidelity and ROC-AUC against binary GT edge masks
+def evaluate_explanation(
+    edge_masks: Iterable[torch.Tensor],
+    GT_edge_masks: Iterable[torch.Tensor],
+    figures_id: str,
+    figures_dir: Path = FIGURES / 'explanations'
+):
+    """"Evaluates ROC-AUC against binary GT edge masks & mask histogram
     
     Returns:
         roc_auc (float)
     """
     from sklearn.metrics import roc_auc_score
-    roc_auc = roc_auc_score(GT_edge_masks.cpu(), edge_masks.cpu())
+
+    # flatten list of per-graph tensors -> single 1D numpy arrays
+    masks_flat = torch.cat([m.detach().cpu().view(-1) for m in edge_masks]).numpy()
+    gt_flat = torch.cat([m.detach().cpu().view(-1) if isinstance(m, torch.Tensor) else torch.tensor(m).view(-1) for m in GT_edge_masks]).numpy()
+
+    roc_auc = roc_auc_score(gt_flat, masks_flat)
     logger.info(f"ROC AUC of explanation: {roc_auc:.4f}")
 
-    # create a histogram of the edge_masks
     figures_dir.mkdir(exist_ok=True, parents=True)
-    plt.hist(edge_masks.cpu().numpy(), bins=50)
+    plt.hist(masks_flat, bins=50)
     plt.savefig(figures_dir / f"{figures_id}_explanation_histogram.png")
     plt.clf()
 
-    # TODO: fidelity/sparsity levels ?
     return roc_auc
 
 
 def main(args):
+    # explain a specifc run
     if args.model_run_path:
         model_run = openpkl(args.model_run_path)
         model_name = Path(args.model_run_path).parent.name
@@ -110,8 +128,31 @@ def main(args):
         logger.info(f"\n --> explaining specific model run at path: {args.model_run_path} \n")
         run_explainers_from_config(
             model_run, 
-            output_path = EXPLAINERS['output'] / model_name / dataset_name)
+            output_path=EXPLAINERS['output'] / model_name / dataset_name,
+            specify_explainer=args.explainer)
 
+    # evaluate existing explanations
+    elif args.evaluate:
+        explanations_dir = EXPLAINERS['output']
+        models = os.listdir(explanations_dir)
+        for model_name in models:
+            model_explanations_dir = explanations_dir / model_name
+            datasets = os.listdir(model_explanations_dir)
+
+            for dataset_name in datasets:
+                explanation_files = os.listdir(model_explanations_dir / dataset_name)
+                for explanation_file in explanation_files:
+                    explanation = openpkl(model_explanations_dir / dataset_name / explanation_file)
+                    GT_test_edge_masks = [g.edge_mask for g in explanation.explainer.graphs if g.test_mask == 1]
+                    model_name = Path(explanation.run.dataset_root).parent.name
+                    dataset_name = Path(explanation.run.dataset_root).stem
+                    logger.info(f'eval for {explanation.name} on model {model_name} for dataset {dataset_name}')
+                    explanation.evaluation_metrics['roc_auc'] = evaluate_explanation(
+                        explanation.edge_masks, GT_test_edge_masks, figures_dir =  FIGURES / 'explanations' / model_name, 
+                        figures_id=f"{dataset_name}_{explanation.name}best"
+                    )
+
+    # explain all runs
     else:
         root = MODELS['output']
         model_names = os.listdir(root)
@@ -127,7 +168,8 @@ def main(args):
                 logger.info(f"\n --> explaining model [{model_name}] for dataset [{dataset_name}]\n")
                 run_explainers_from_config(
                     model_run, 
-                    output_path = EXPLAINERS['output'] / model_name / dataset_name)
+                    output_path=EXPLAINERS['output'] / model_name / dataset_name,
+                    specify_explainer=args.explainer)
 
 
 if __name__ == "__main__":
@@ -137,5 +179,16 @@ if __name__ == "__main__":
         '-m', 
         '--model-run-path', 
         help='specific model run to explain (expects [some_path]/[model_name]/[dataset_name].pkl), as a path to the ModelRun pkl file'
+    )
+    parser.add_argument(
+        '-e', 
+        '--evaluate', 
+        action='store_true',
+        help='evaluate existing explanations instead'
+    )
+    parser.add_argument(
+        '-ex', 
+        '--explainer', 
+        help='only apply a single explainer (names defined under config.py)'
     )
     main(parser.parse_args())

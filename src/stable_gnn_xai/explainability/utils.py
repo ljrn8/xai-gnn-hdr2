@@ -16,16 +16,16 @@ def uniform_debug_log(soft_edge_masks: torch.Tensor, check_parameters=None):
             logger.debug(f"{name} norm: {p.data.norm():.4f}, grad_norm: {grad_norm}")
 
     logger.debug(
-        f"mask [0] bincounts = {np.histogram(soft_edge_masks[0].detach(), bins=10)}"
+        f"mask [0] bincounts = {np.histogram(soft_edge_masks[0].cpu().detach(), bins=10)}"
     )
     logger.debug(
-        f"mask [1] bincounts = {np.histogram(soft_edge_masks[1].detach(), bins=10)}"
+        f"mask [1] bincounts = {np.histogram(soft_edge_masks[1].cpu().detach(), bins=10)}"
     )
     logger.debug(
-        f"mask [2] bincounts = {np.histogram(soft_edge_masks[2].detach(), bins=10)}"
+        f"mask [2] bincounts = {np.histogram(soft_edge_masks[2].cpu().detach(), bins=10)}"
     )
     logger.debug(
-        f"mask [3] bincounts = {np.histogram(soft_edge_masks[3].detach(), bins=10)}"
+        f"mask [3] bincounts = {np.histogram(soft_edge_masks[3].cpu().detach(), bins=10)}"
     )
 
 

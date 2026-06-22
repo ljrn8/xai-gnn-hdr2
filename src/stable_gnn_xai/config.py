@@ -1,7 +1,6 @@
 from .training.models import WeightedNodeGCN, WeightedNodeGIN
 from .explainability.explainers.PGExplainers import (
     PGExplainer, 
-    PGEExplanationModule,
     ComprehensiveMLPExplanationModule, 
     GRUExplanationModule
 )
@@ -18,7 +17,8 @@ SEED = 0
 
 FIGURES = Path("output/figures")
 
-DATASETS = {"output": Path("Data"), "test_split": 0.2, "validation_split": 0.2}
+# note: changed for RunPod instance
+DATASETS = {"output": Path("/Data"), "test_split": 0.2, "validation_split": 0.2}
 
 MODELS = {
     "output": Path("output/runs"),
@@ -53,9 +53,9 @@ EXPLAINERS = {
             'hyperparameters': {
                 'tau': [0.5]*3,
                 'reparameterization_samples': [30]*3,
-                'lr': [0.01, 0.05, 0.1],
+                'lr': [0.01, 0.5, 0.1],
                 'hidden_size': [64, 64, 32],
-                'epochs': [300, 200, 100],
+                'epochs': [500, 500, 500],
                 'entropy_regularization': [0.1, 0.1, 0.1],
                 'mean_regularization': [0.1, 0.1, 0.1],
             }
@@ -68,9 +68,9 @@ EXPLAINERS = {
                 'explanation_module_class': [GRUExplanationModule]*3,
                 'lr': [0.01, 0.05, 0.1],
                 'hidden_size': [64, 64, 32],
-                'epochs': [300, 200, 100],
-                'entropy_regularization': [0.1, 0.1, 0.1],
-                'mean_regularization': [0.1, 0.1, 0.1],
+                'epochs': [500, 500, 500],
+                'entropy_regularization': [0.1, 0.05, 0.1],
+                'mean_regularization': [0.1, 0.05, 0.1],
             }
         },
         'PGE-ComprehensiveMLP': {
@@ -81,22 +81,23 @@ EXPLAINERS = {
                 'explanation_module_class': [ComprehensiveMLPExplanationModule]*3,
                 'lr': [0.01, 0.05, 0.1],
                 'hidden_size': [64, 64, 32],
-                'epochs': [300, 200, 100],
-                'entropy_regularization': [0.1, 0.1, 0.1],
-                'mean_regularization': [0.1, 0.1, 0.1],
+                'epochs': [500, 500, 500],
+                'entropy_regularization': [0.1, 0.05, 0.1],
+                'mean_regularization': [0.1, 0.05, 0.1],
             }
             
         },
         'GNNExplainer': {
             'class': GNNExplainer,
             'hyperparameters': {
-                'lr': [0.01, 0.05, 0.1],
-                'hidden_size': [64, 64, 32],
-                'epochs': [300, 200, 100],
+                'lr': [0.1, 0.5],
+                'epochs': [500, 500],
+                'entropy_regularization': [0.01, 0.01  ],
+                'mean_regularization': [0.01   , 0.01 ],
             }
         },
-        'Random Explainer': {
-            'class': RandomExplainer
-        }
+        # 'Random Explainer': {
+            # 'class': RandomExplainer
+        # }
     }
 }

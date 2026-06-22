@@ -10,4 +10,3 @@ Requires-Dist: kneed>=0.8.6
 Requires-Dist: loguru>=0.7.3
 Requires-Dist: matplotlib>=3.11.0
 Requires-Dist: scikit-learn>=1.9.0
-Requires-Dist: torch>=2.12.1
