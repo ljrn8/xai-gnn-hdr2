@@ -30,10 +30,7 @@ STANDARD_DATASETS = [
 
 
 class OGXBenchmark(InMemoryDataset):
-    """OpenGraphXAI benchmark datasets. function from Fontanesi et al. (2025)
-
-    see https://github.com/OpenGraphXAI/benchmarks
-    """
+    """Class taken from Fontanesi et al. (2025), see https://github.com/OpenGraphXAI/benchmarks"""
 
     url = r"https://github.com/OpenGraphXAI/benchmarks/raw/refs/heads/main/data/raw/"
 
@@ -144,6 +141,20 @@ class OGXBenchmark(InMemoryDataset):
         return f"{self.name}({len(self)})"
 
 
+def OHE_graph(G, num_classes):
+    assert G.x.dim() == 1, "Expected node features to be 1D for OHE encoding"
+    assert (
+        int(G.x.max().item()) + 1 < 1000
+    ), "Expected at less than 1000 classes for OHE encoding"
+    G.x = F.one_hot(G.x, num_classes=num_classes).float()
+    return G
+
+
+def node_mask_to_edge_mask(edge_index, node_mask):
+    src, dst = edge_index
+    return node_mask[src] & node_mask[dst]
+
+
 def yield_datasets(raw_directory: Path, datasets=STANDARD_DATASETS):
     for ds_name in datasets:
         logger.info(f" Dataset name: {ds_name}")
@@ -156,18 +167,15 @@ def yield_datasets(raw_directory: Path, datasets=STANDARD_DATASETS):
         print(f"x shape: {ds[0].x.shape}")
         print(f"x example: {ds[0].x}")
         print(f"num x classes: {num_classes}")
+        
+        graphs = [OHE_graph(G, num_classes=num_classes) for G in ds]
 
-        def OHE_graph(G):
-            assert G.x.dim() == 1, "Expected node features to be 1D for OHE encoding"
-            assert (
-                int(G.x.max().item()) + 1 < 1000
-            ), "Expected at less than 1000 classes for OHE encoding"
-            G.x = F.one_hot(G.x, num_classes=num_classes).float()
-            return G
-
-        graphs = [OHE_graph(G) for G in ds]
         for graph in graphs:
-            graph.edge_mask = graph.mask
+            node_mask = graph.mask.bool()
+            if node_mask.dim() > 1:
+                node_mask = node_mask.squeeze(-1)
+
+            graph.edge_mask = node_mask_to_edge_mask(graph.edge_index, node_mask).float()
 
         yield graphs, ds_name
 
@@ -186,8 +194,9 @@ def main():
             seed=SEED,
             test_fraction=DATASETS["test_split"],
             val_fraction=DATASETS["validation_split"],
-            overwrite=False,
         )
+        logger.info(f'graphs[0] edge_mask shape: {graphs[0].edge_mask.shape} edge_index shape: {graphs[0].edge_index.shape}')
+        logger.info(f'n nodes in graphs[0]: {graphs[0].num_nodes} n edges: {graphs[0].num_edges}')
 
 
 if __name__ == "__main__":

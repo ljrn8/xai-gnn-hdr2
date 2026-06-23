@@ -17,8 +17,7 @@ SEED = 0
 
 FIGURES = Path("output/figures")
 
-# note: changed for RunPod instance
-DATASETS = {"output": Path("/Data"), "test_split": 0.2, "validation_split": 0.2}
+DATASETS = {"output": Path("Data"), "test_split": 0.2, "validation_split": 0.2}
 
 MODELS = {
     "output": Path("output/runs"),
@@ -48,6 +47,20 @@ MODELS = {
 EXPLAINERS = {
     "output": Path("output/explanations"), 
     "exhuastive_search_configurations": {
+
+        'debug': {
+            'class': GNNExplainer,
+            'hyperparameters': {
+                'lr': [0.1],
+                'epochs': [500],
+                'entropy_regularization': [0.1],
+                'mean_regularization': [0.5],
+            }
+        },
+
+        
+        # !! HPO is only viable for mean and entropy regularization, 
+        # larger sized expl modules will suffice for all problems (overfitting is the goal)
         'PGE': {
             'class': PGExplainer,
             'hyperparameters': {
@@ -60,6 +73,7 @@ EXPLAINERS = {
                 'mean_regularization': [0.1, 0.1, 0.1],
             }
         },
+
         'PGE-ComprehensiveGRU': {
             'class': PGExplainer,
             'hyperparameters': {
@@ -73,6 +87,7 @@ EXPLAINERS = {
                 'mean_regularization': [0.1, 0.05, 0.1],
             }
         },
+
         'PGE-ComprehensiveMLP': {
             'class': PGExplainer,
             'hyperparameters': {
@@ -87,17 +102,16 @@ EXPLAINERS = {
             }
             
         },
+
         'GNNExplainer': {
             'class': GNNExplainer,
             'hyperparameters': {
-                'lr': [0.1, 0.5],
+                'lr': [0.1, 0.01],
                 'epochs': [500, 500],
-                'entropy_regularization': [0.01, 0.01  ],
-                'mean_regularization': [0.01   , 0.01 ],
+                'entropy_regularization': [0.1, 0.1  ],
+                'mean_regularization': [0.5, 0.5],
             }
         },
-        # 'Random Explainer': {
-            # 'class': RandomExplainer
-        # }
+        
     }
 }

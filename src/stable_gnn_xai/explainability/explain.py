@@ -12,6 +12,23 @@ from typing_extensions import Iterable
 import matplotlib.pyplot as plt
 
 
+def save_cuves(explainer: Explanation, id: str, directory: Path = FIGURES / 'explanations'):
+    """Saves loss curves from explainer training as png files in the specified directory"""
+    
+    directory.mkdir(exist_ok=True, parents=True)
+    if not hasattr(explainer.explainer, 'example_loss_curves'):
+        logger.warning(f"explainer {explainer.name} has no loss curves to save")
+        return
+    
+    for curve_name, curve_values in explainer.explainer.example_loss_curves.items():
+        plt.plot(curve_values)
+        plt.title(f"{id} {curve_name} curve")
+        plt.xlabel("Epoch")
+        plt.ylabel(curve_name)
+        plt.savefig(directory / f"{id}_{curve_name}_curve.png")
+        plt.clf()
+
+
 def run_explainers_from_config(
         model_run: ModelRun, 
         output_path: Path, 
@@ -70,9 +87,9 @@ def run_explainers_from_config(
                 graphs=test_graphs, 
                 **{k: hyperparameters_config[k][config_idx] for k in hyperparameters_config.keys() if k != 'class'}
             )
-            masks, final_objective_loss = explainer.explain_graph_task()
-            if final_objective_loss < best_penalty:
-                best_penalty = final_objective_loss
+            masks, penalty = explainer.explain_graph_task()
+            if penalty < best_penalty:
+                best_penalty = penalty
                 best_explanation = Explanation(
                     explainer=explainer,
                     run=model_run,
@@ -87,6 +104,9 @@ def run_explainers_from_config(
             best_explanation.edge_masks, GT_test_edge_masks, figures_id=f"{dataset}_{explainer_name}_best"
         )
         output_path.mkdir(exist_ok=True, parents=True)
+        ds_name = Path(model_run.dataset_root).stem
+        model_name = Path(model_run.dataset_root).parent.name
+        save_cuves(best_explanation, id=f"{explainer_name}_{model_name}_{ds_name}_best")
         savepkl(best_explanation, output_path / f"{explainer_name}.pkl")
 
 
@@ -96,17 +116,18 @@ def evaluate_explanation(
     figures_id: str,
     figures_dir: Path = FIGURES / 'explanations'
 ):
-    """"Evaluates ROC-AUC against binary GT edge masks & mask histogram
+    """"Evaluates ROC-AUC against binary GT edge masks & writes mask histogram
     
     Returns:
         roc_auc (float)
     """
     from sklearn.metrics import roc_auc_score
 
-    # flatten list of per-graph tensors -> single 1D numpy arrays
-    masks_flat = torch.cat([m.detach().cpu().view(-1) for m in edge_masks]).numpy()
-    gt_flat = torch.cat([m.detach().cpu().view(-1) if isinstance(m, torch.Tensor) else torch.tensor(m).view(-1) for m in GT_edge_masks]).numpy()
+    # !!! 66 and 34
+    # logger.debug(f'edge_masks[0] shape {edge_masks[0].shape} GT_edge_masks[0] shape {GT_edge_masks[0].shape}')
 
+    masks_flat = torch.cat([m.detach().cpu().view(-1) for m in edge_masks]).numpy()
+    gt_flat = torch.cat([m.detach().cpu().view(-1) for m in GT_edge_masks]).numpy()
     roc_auc = roc_auc_score(gt_flat, masks_flat)
     logger.info(f"ROC AUC of explanation: {roc_auc:.4f}")
 
@@ -143,7 +164,10 @@ def main(args):
                 explanation_files = os.listdir(model_explanations_dir / dataset_name)
                 for explanation_file in explanation_files:
                     explanation = openpkl(model_explanations_dir / dataset_name / explanation_file)
-                    GT_test_edge_masks = [g.edge_mask for g in explanation.explainer.graphs if g.test_mask == 1]
+
+                    graphs = openpkl(explanation.run.dataset_root)
+                    GT_test_edge_masks = [g.edge_mask for g in graphs if g.test_mask == 1]
+
                     model_name = Path(explanation.run.dataset_root).parent.name
                     dataset_name = Path(explanation.run.dataset_root).stem
                     logger.info(f'eval for {explanation.name} on model {model_name} for dataset {dataset_name}')

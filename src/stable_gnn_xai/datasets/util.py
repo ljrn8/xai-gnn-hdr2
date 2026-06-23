@@ -13,7 +13,7 @@ def write_graph_iterable(
     seed,
     test_fraction,
     val_fraction,
-    overwrite=False,
+    overwrite=True,
 ):
     """Attribute validation_mask, train_mask and write dataset to processed destination"""
 

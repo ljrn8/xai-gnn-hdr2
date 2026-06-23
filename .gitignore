@@ -1,10 +1,12 @@
 output
 env
+.env
+.ev
+.venv
 __pycache__
 interm
 raw
 archive
 papercode
 script_buffer.sh
-
 Data
