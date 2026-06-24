@@ -182,6 +182,7 @@ class PGExplainer(GraphLevelExplainer):
         self.tau = tau
         self.reparameterization_samples = reparameterization_samples
         self.loss_f = loss_f
+        self.example_loss_curves = {'BCELoss': [], 'entropy_regularization': [], 'mean_regularization': []}
         self.explanation_module = explanation_module_class(
             model=model, graphs=graphs, hidden_size=hidden_size
         ).to(DEVICE)
@@ -242,6 +243,10 @@ class PGExplainer(GraphLevelExplainer):
             loss = self.loss_f(explanatory_y_preds, y_preds)
             loss += mean_reg + entropy_reg
             loss.backward()
+
+            self.example_loss_curves['BCELoss'].append(loss.item())
+            self.example_loss_curves['entropy_regularization'].append(entropy_reg.item())
+            self.example_loss_curves['mean_regularization'].append(mean_reg.item())
 
             pbar.set_description(
                 f"PGExplainer @ epc {epc} | BCEloss={loss.item():.5f} | entropy_reg={entropy_reg:.5f} | mean_reg={mean_reg:.5f}"
