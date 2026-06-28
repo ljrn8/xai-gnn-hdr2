@@ -12,6 +12,7 @@ import torch.nn.functional as F
 from torch import Tensor
 from torch_geometric.data import Data
 from torch_geometric.nn import GCNConv
+from loguru import logger
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -48,7 +49,6 @@ class ProxyGraphGenerator(nn.Module):
         lam:              lambda weighting L_KL in L_gen (eq. 17)
         beta:             upweight for present edges in L_in (eq. 11)
     """
-
     def __init__(self, node_feature_dim: int, latent_dim: int = 32,
                  lam: float = 1.0, beta: float = 1.0):
         super().__init__()
@@ -62,6 +62,7 @@ class ProxyGraphGenerator(nn.Module):
         self.vgae_enc_mu = _GCNEncoder(node_feature_dim, latent_dim)
         self.vgae_enc_logvar = _GCNEncoder(node_feature_dim, latent_dim)
 
+
     def forward(self, G: Data, soft_mask: Tensor):
         """
         Returns:
@@ -72,7 +73,7 @@ class ProxyGraphGenerator(nn.Module):
         x = G.x.float()
         edge_index = G.edge_index
 
-        is_exp = soft_mask.detach() > 0.5
+        is_exp = (soft_mask.detach().squeeze() > 0.5).view(-1).squeeze()
         exp_ei = edge_index[:, is_exp]
         non_exp_ei = edge_index[:, ~is_exp]
 
@@ -109,7 +110,7 @@ class ProxyGraphGenerator(nn.Module):
                          threshold: float = 0.5) -> Data:
         """Threshold A_tilde into a Data object, always keeping G_exp edges."""
         edge_index = G.edge_index
-        is_exp = soft_mask.detach() > 0.5
+        is_exp = (soft_mask.detach().squeeze() > 0.5).view(-1)
         exp_ei = edge_index[:, is_exp]
 
         # threshold proxy, zero out exp region to avoid double-counting

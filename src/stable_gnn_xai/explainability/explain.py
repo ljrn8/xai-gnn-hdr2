@@ -108,9 +108,9 @@ def run_explainers_from_config(
 
             # add metadata
             ts = get_timestamp()
-            id = f'{explainer_name}_{ds_name}_{model_name}_{ts}'
             ds_name = Path(model_run.dataset_root).stem
             model_name = Path(model_run.dataset_root).parent.name
+            id = f'{explainer_name}_{ds_name}_{model_name}_{ts}'
             params['penalty'] = penalty
             params['id'] = id
             params['model_name'] = model_name

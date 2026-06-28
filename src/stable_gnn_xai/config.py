@@ -26,11 +26,15 @@ EXPLAINER_GRIDS = {
         'reparameterization_samples':   [30],
         'lr':                           [0.01, 0.5],
         'hidden_size':                  [64],
-        'epochs':                       [2],
+        'epochs':                       [100],
         'entropy_regularization':       [0.1],
         'mean_regularization':          [0.1],
         "explanation_module_class":     [PGEExplanationModule],
-        "use_proxy":                    [False]
+        "use_proxy":                    [False],
+        "proxy_M":                      [1, 5],
+        "proxy_lr":                     [0.01, 0.1],
+        "proxy_lam":                    [0.25, 0.5],
+        "proxy_latent":                 [64],
     },
 
 
@@ -54,7 +58,7 @@ EXPLAINER_GRIDS = {
 
     "GNNExplainer": {
         'lr': [0.1, 0.01],
-        'epochs': [500],
+        'epochs': [1],
         'entropy_regularization': [0.1],
         'mean_regularization': [0.5],
     }

@@ -36,6 +36,35 @@ def _batch_MC_BCE_estimate(tau, model,
     return scores.view(n_graphs, samples).mean(dim=1)  # (N,)
 
 
+def _batch_MC_BCE_estimate_proxy(tau, model,
+                                tiled_graphs_batch: Batch,
+                                all_edge_mask_logits, is_exp_masks, proxy_edge_counts,
+                                samples, n_graphs):
+    """Same as _batch_MC_BCE_estimate, but edge_weight is built to match the proxy
+    graph's edge_index instead of the original graph's: edges kept from G_exp reuse
+    their Binary Concrete sample (selected via is_exp_masks), and the remaining
+    proxy-only (delta) edges get weight 1.0, since they were already a hard
+    present/absent decision made when the proxy graph was built."""
+
+    edge_weights = []
+    for logits, is_exp, n_proxy_edges in zip(all_edge_mask_logits, is_exp_masks, proxy_edge_counts):
+        u = torch.rand(samples, logits.shape[0], device=logits.device).clamp(1e-6, 1 - 1e-6)
+        log_noise = torch.log(u) - torch.log(1 - u)
+        hard = torch.sigmoid((logits.squeeze() + log_noise) / tau)  # (samples, n_edges)
+
+        exp_weight = hard[:, is_exp]  # (samples, n_exp_edges)
+        n_new_edges = n_proxy_edges - exp_weight.shape[1]
+        new_weight = torch.ones(samples, n_new_edges, device=logits.device)
+
+        edge_weights.append(torch.cat([exp_weight, new_weight], dim=1).reshape(-1))
+
+    edge_weight = torch.cat(edge_weights)  # matches batched proxy edge_index ordering
+    scores = torch.sigmoid(model(tiled_graphs_batch.x,
+                                 tiled_graphs_batch.edge_index, edge_weight=edge_weight, batch=tiled_graphs_batch.batch))
+
+    return scores.view(n_graphs, samples).mean(dim=1)  # (N,)
+
+
 def get_model_embeddings_batched(model: GNN, graphs: Batch):
     """Detatched lists of the node embeddings for a batched forward for each intermediate layer.
 
@@ -158,7 +187,8 @@ class GRUExplanationModule(CustomExplanationModule):
 
 
 class PGExplainer(GraphLevelExplainer):
-    """Standard PGExplainer with optional explanatory module and ProxyExplainer proxy-graph mode from Chen et al. (2026)."""
+    """PGExplainer: fits an explanation module to produce edge mask logits, evaluated
+    against the original graph via Monte Carlo Binary Concrete subgraph sampling."""
 
     def __init__(
         self,
@@ -173,9 +203,6 @@ class PGExplainer(GraphLevelExplainer):
         reparameterization_samples,
         explanation_module_class: CustomExplanationModule = PGEExplanationModule,
         loss_f=torch.nn.BCELoss(),
-        proxy_generator: ProxyGraphGenerator = None,
-        proxy_lr: float = None,
-        proxy_M: int = 1,
     ):
         super().__init__(model, graphs)
         self.hidden_size = hidden_size
@@ -186,12 +213,7 @@ class PGExplainer(GraphLevelExplainer):
         self.tau = tau
         self.reparameterization_samples = reparameterization_samples
         self.loss_f = loss_f
-        self.proxy_M = proxy_M
-        self.proxy_generator = proxy_generator
-        self.proxy_optimizer = torch.optim.Adam(
-            self.proxy_generator.parameters(), lr=proxy_lr or lr
-        ) if proxy_generator else None 
-        
+
         self.example_loss_curves = {'BCELoss': [], 'entropy_regularization': [], 'mean_regularization': []}
         self.explanation_module = explanation_module_class(
             model=model, graphs=graphs, hidden_size=hidden_size
@@ -225,39 +247,18 @@ class PGExplainer(GraphLevelExplainer):
             optimizer.zero_grad()
 
             logit_edge_masks = self.explanation_module.get_explanation()
+
+            for m, g in zip(logit_edge_masks, self.graphs):
+                assert m.shape[0] == g.edge_index.shape[1], f"mask shape {m.shape} does not match graph edge count {g.edge_index.shape}"
+
             soft_edge_masks = [torch.sigmoid(m) for m in logit_edge_masks]
-
-            # --- ProxyExplainer: inner opt + proxy graph construction (Alg. 2) ---
-            if self.proxy_generator is not None:
-
-                # inner optimization: tra in proxy generator proxy_M steps with explainer fixed
-                logger.debug('running inner optimization for proxy graph generator')
-                for _ in range(self.proxy_M):
-                    self.proxy_optimizer.zero_grad()
-                    gen_loss = sum(
-                        self.proxy_generator(G, mask)[1]
-                        for G, mask in zip(self.graphs, soft_edge_masks)
-                    )
-                    gen_loss.backward()
-                    self.proxy_optimizer.step()
-
-                # build proxy graphs for this epoch's MC estimate
-                logger.debug('running proxy graph construction for MC estimate')
-                proxy_graphs = []
-                for G, mask in zip(self.graphs, soft_edge_masks):
-                    A_tilde, _ = self.proxy_generator(G, mask.detach())
-                    proxy_graphs.append(self.proxy_generator.build_proxy_data(G, A_tilde, mask.detach()))
-                tiled_proxy = [G for G in proxy_graphs for _ in range(self.reparameterization_samples)]
-                eval_batch = Batch.from_data_list(tiled_proxy).to(DEVICE)
-            else:
-                eval_batch = batched
 
             # Subgraph Estimate
             # (tile-parrelelized over graphs and graph samples)
             explanatory_y_preds = _batch_MC_BCE_estimate(
                 tau=self.tau,
                 model=model,
-                tiled_graphs_batch=eval_batch,
+                tiled_graphs_batch=batched,
                 all_edge_mask_logits=logit_edge_masks,
                 samples=self.reparameterization_samples,
                 n_graphs=len(self.graphs)
@@ -291,7 +292,140 @@ class PGExplainer(GraphLevelExplainer):
 
         uniform_debug_log(soft_edge_masks)
         return soft_edge_masks, loss.item()
-    
+
+
+class ProxyExplainer(PGExplainer):
+    """PGExplainer variant with the ProxyExplainer proxy-graph mode from Chen et al. (2026):
+    trains a ProxyGraphGenerator alongside the explanation module and evaluates the explanation
+    mask against the resulting proxy graph instead of the original graph (Alg. 2)."""
+
+    def __init__(
+        self,
+        model: GNN,
+        graphs: Iterable[Data],
+        hidden_size,
+        epochs,
+        lr,
+        mean_regularization,
+        entropy_regularization,
+        tau,
+        reparameterization_samples,
+        proxy_generator: ProxyGraphGenerator,
+        explanation_module_class: CustomExplanationModule = PGEExplanationModule,
+        loss_f=torch.nn.BCELoss(),
+        proxy_lr: float = 0.01,
+        proxy_M: int = 1,
+    ):
+        super().__init__(
+            model=model,
+            graphs=graphs,
+            hidden_size=hidden_size,
+            epochs=epochs,
+            lr=lr,
+            mean_regularization=mean_regularization,
+            entropy_regularization=entropy_regularization,
+            tau=tau,
+            reparameterization_samples=reparameterization_samples,
+            explanation_module_class=explanation_module_class,
+            loss_f=loss_f,
+        )
+        self.proxy_generator = proxy_generator
+        self.proxy_M = proxy_M
+        self.proxy_optimizer = torch.optim.Adam(self.proxy_generator.parameters(), lr=proxy_lr or lr)
+
+    def explain_graph_task(self):
+        model, graphs = self.explanation_module.model, self.explanation_module.graphs
+        model.eval()
+        for p in model.parameters():
+            p.requires_grad = False
+
+        logger.info('Tiling graphs for Monte Carlo sampling')
+        batch_obj = Batch.from_data_list(graphs)
+        with torch.no_grad():
+            y_preds = torch.sigmoid(
+                model(batch_obj.x, batch_obj.edge_index, batch=batch_obj.batch).view(-1)
+            ).detach()
+        logger.info('done')
+
+        optimizer = torch.optim.Adam(self.explanation_module.parameters(), lr=self.lr)
+
+        pbar = tqdm(range(1, self.epochs + 1))
+        for epc in pbar:
+            optimizer.zero_grad()
+
+            logit_edge_masks = self.explanation_module.get_explanation()
+
+            for m, g in zip(logit_edge_masks, self.graphs):
+                assert m.shape[0] == g.edge_index.shape[1], f"mask shape {m.shape} does not match graph edge count {g.edge_index.shape}"
+
+            soft_edge_masks = [torch.sigmoid(m) for m in logit_edge_masks]
+
+            # inner optimization: train proxy generator proxy_M steps with explainer fixed
+            logger.debug('running inner optimization for proxy graph generator')
+            for _ in range(self.proxy_M):
+                self.proxy_optimizer.zero_grad()
+                gen_loss = sum(
+                    self.proxy_generator(G, mask)[1]
+                    for G, mask in zip(self.graphs, soft_edge_masks)
+                )
+                gen_loss.backward()
+                self.proxy_optimizer.step()
+
+            # build proxy graphs for this epoch's MC estimate, tracking which edges
+            # came from G_exp so the MC estimate can reuse their mask weight
+            logger.debug('running proxy graph construction for MC estimate')
+            proxy_graphs = []
+            is_exp_masks = []
+            for G, mask in zip(self.graphs, soft_edge_masks):
+                A_tilde, _ = self.proxy_generator(G, mask.detach())
+                proxy_graphs.append(self.proxy_generator.build_proxy_data(G, A_tilde, mask.detach()))
+                is_exp_masks.append((mask.detach().squeeze() > 0.5).view(-1))
+
+            proxy_edge_counts = [G.edge_index.shape[1] for G in proxy_graphs]
+            tiled_proxy = [G for G in proxy_graphs for _ in range(self.reparameterization_samples)]
+            eval_batch = Batch.from_data_list(tiled_proxy).to(DEVICE)
+
+            # Subgraph Estimate against the proxy graph
+            # (tile-parrelelized over graphs and graph samples)
+            explanatory_y_preds = _batch_MC_BCE_estimate_proxy(
+                tau=self.tau,
+                model=model,
+                tiled_graphs_batch=eval_batch,
+                all_edge_mask_logits=logit_edge_masks,
+                is_exp_masks=is_exp_masks,
+                proxy_edge_counts=proxy_edge_counts,
+                samples=self.reparameterization_samples,
+                n_graphs=len(self.graphs)
+            )
+
+            # regularization
+            entropy_reg = (
+                self.entropy_regularization
+                * torch.stack(
+                    [elementwise_entropy(m).mean() for m in soft_edge_masks]
+                ).mean()
+            )
+            mean_reg = (
+                self.mean_regularization
+                * torch.stack([m.mean() for m in soft_edge_masks]).mean()
+            )
+
+            loss = self.loss_f(explanatory_y_preds, y_preds)
+            loss += mean_reg + entropy_reg
+            loss.backward()
+            optimizer.step()
+
+            self.example_loss_curves['BCELoss'].append(loss.item())
+            self.example_loss_curves['entropy_regularization'].append(entropy_reg.item())
+            self.example_loss_curves['mean_regularization'].append(mean_reg.item())
+
+            pbar.set_description(
+                f"ProxyExplainer @ epc {epc} | BCEloss={loss.item():.5f} | entropy_reg={entropy_reg:.5f} | mean_reg={mean_reg:.5f}"
+            )
+
+        uniform_debug_log(soft_edge_masks)
+        return soft_edge_masks, loss.item()
+
 
 def grid_search(model, graphs, search_dict: dict) -> list[tuple]:
     from itertools import product
@@ -301,17 +435,22 @@ def grid_search(model, graphs, search_dict: dict) -> list[tuple]:
         params = dict(zip(keys, combo))
 
         use_proxy = params.pop("use_proxy")
-        proxy_lam = params.pop("proxy_lam", 1.0)
-        proxy_latent = params.pop("proxy_latent", 32)
+        proxy_lam = params.pop("proxy_lam", None)
+        proxy_latent = params.pop("proxy_latent", None)
+        proxy_M = params.pop("proxy_M", None)
+        proxy_M = params.pop("proxy_lr", None)
 
-        params["proxy_generator"] = ProxyGraphGenerator(
-            node_feature_dim=graphs[0].x.shape[1],
-            latent_dim=proxy_latent,
-            lam=proxy_lam,
-        ).to(DEVICE) if use_proxy else None
+        if use_proxy:
+            params["proxy_generator"] = ProxyGraphGenerator(
+                node_feature_dim=graphs[0].x.shape[1],
+                latent_dim=proxy_latent,
+                lam=proxy_lam,
+                proxy_M=proxy_M
+            ).to(DEVICE)
+            explainer = ProxyExplainer(model=model, graphs=graphs, **params)
+        else:
+            explainer = PGExplainer(model=model, graphs=graphs, **params)
 
-        configs.append(
-            (params, (PGExplainer(model=model, graphs=graphs, **params)))
-        )
+        configs.append((params, explainer))
 
     return configs
