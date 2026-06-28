@@ -10,6 +10,13 @@ from ..util import openpkl, savepkl
 from ..config import EXPLAINERS, MODELS, FIGURES, DEVICE
 from typing_extensions import Iterable
 import matplotlib.pyplot as plt
+from .explainers.PGExplainers import grid_search as pgexplainer_grid_search
+from .explainers.GNNExplainer import grid_search as gnne_grid_search
+
+
+def get_timestamp():
+    from datetime import datetime
+    return datetime.now().strftime("%Y%m%d_%H%M%S")
 
 
 def save_cuves(explainer: Explanation, id: str, directory: Path = FIGURES / 'explanations'):
@@ -29,17 +36,28 @@ def save_cuves(explainer: Explanation, id: str, directory: Path = FIGURES / 'exp
         plt.clf()
 
 
+def apply_grid_search(explainer_class, model, graphs, hyperparameters: dict) -> list:
+    """Applies grid search for the given explainer class and hyperparameters"""
+
+    if explainer_class == "PGExplainer":
+        return pgexplainer_grid_search(model, graphs, hyperparameters)
+    elif explainer_class == "GNNExplainer":
+        return gnne_grid_search(model, graphs, hyperparameters)
+    else:
+        raise ValueError(f"Grid search not implemented for {explainer_class.__name__}")
+
+
 def run_explainers_from_config(
         model_run: ModelRun, 
-        output_path: Path, 
-        explainers_search: dict = EXPLAINERS['exhuastive_search_configurations'],
+        output_path: Path,
+        explainers_grid_parameters: dict = EXPLAINERS['explainers'],
         specify_explainer: str = None
 ):
-    """Applies, optimizes and saves all explainers specified in explainers_search towards the model run 
+    """Applies grid search of explainers to model run
     
     Produces:
         [output_path]/
-            [explainer_name].pkl
+            {explainer_name}_{ds_name}_{model_name}_{timestamp}.pkl
     """
     graphs = openpkl(model_run.dataset_root)
     GT_test_edge_masks = [g.edge_mask for g in graphs if g.test_mask == 1]
@@ -68,46 +86,52 @@ def run_explainers_from_config(
             e == embedding_sizes[0]
         ), f"all latent embeddings must be the same size for an RNN Module"
 
+    
     # Exhuastive explainer configuration search loop
-    for explainer_name, explainer_config in explainers_search.items():
+    for explainer_name, explainer_config in explainers_grid_parameters.items():
         if specify_explainer and explainer_name != specify_explainer:
             logger.info(f'skipping {explainer_name} as unspecified explainer')
             continue
 
-        logger.info(f'EXPLAINER: {explainer_name}')
-        hyperparameters_config = explainer_config['hyperparameters']
-        expl_class = explainer_config['class']
-        hp_names = list(hyperparameters_config.keys())
-        n_configurations = len(hyperparameters_config[hp_names[0]])
-        best_penalty = float('inf')
-
-        for config_idx in range(n_configurations):
-            explainer = expl_class(
-                model=model, 
-                graphs=test_graphs, 
-                **{k: hyperparameters_config[k][config_idx] for k in hyperparameters_config.keys() if k != 'class'}
-            )
-            masks, penalty = explainer.explain_graph_task()
-            if penalty < best_penalty:
-                best_penalty = penalty
-                best_explanation = Explanation(
-                    explainer=explainer,
-                    run=model_run,
-                    task_type='graph',
-                    edge_masks=masks,
-                    name=explainer_name
-                )
-
-            evaluate_explanation(masks, GT_test_edge_masks, figures_id=f"{dataset}_{explainer_name}_{config_idx}")
-
-        best_explanation.evaluation_metrics['roc_auc'] = evaluate_explanation(
-            best_explanation.edge_masks, GT_test_edge_masks, figures_id=f"{dataset}_{explainer_name}_best"
+        grid = apply_grid_search(
+            explainer_class=explainer_name,
+            model=model,
+            graphs=test_graphs,
+            hyperparameters=explainer_config
         )
-        output_path.mkdir(exist_ok=True, parents=True)
-        ds_name = Path(model_run.dataset_root).stem
-        model_name = Path(model_run.dataset_root).parent.name
-        save_cuves(best_explanation, id=f"{explainer_name}_{model_name}_{ds_name}_best")
-        savepkl(best_explanation, output_path / f"{explainer_name}.pkl")
+
+        logger.info(f'EXPLAINER: {explainer_name}')
+
+        for params, explainer in grid:
+            logger.debug(f'running parameters for {explainer_name}: {params}')
+            masks, penalty = explainer.explain_graph_task()
+
+            # add metadata
+            ts = get_timestamp()
+            id = f'{explainer_name}_{ds_name}_{model_name}_{ts}'
+            ds_name = Path(model_run.dataset_root).stem
+            model_name = Path(model_run.dataset_root).parent.name
+            params['penalty'] = penalty
+            params['id'] = id
+            params['model_name'] = model_name
+            params['ds_name'] = ds_name
+
+            explanation = Explanation(
+                explainer=explainer,
+                run=model_run,
+                task_type='graph',
+                edge_masks=masks,
+                name=explainer_name,
+                metadata=params,
+            )
+            
+            evaluate_explanation(masks, GT_test_edge_masks, figures_id=id)
+            explanation.evaluation_metrics['roc_auc'] = evaluate_explanation(
+                explanation.edge_masks, GT_test_edge_masks, figures_id=f"{dataset}_{explainer_name}_best"
+            )
+            output_path.mkdir(exist_ok=True, parents=True)
+            save_cuves(explanation, id=id)
+            savepkl(explanation, output_path / f"{id}.pkl")
 
 
 def evaluate_explanation(
@@ -122,9 +146,6 @@ def evaluate_explanation(
         roc_auc (float)
     """
     from sklearn.metrics import roc_auc_score
-
-    # !!! 66 and 34
-    # logger.debug(f'edge_masks[0] shape {edge_masks[0].shape} GT_edge_masks[0] shape {GT_edge_masks[0].shape}')
 
     masks_flat = torch.cat([m.detach().cpu().view(-1) for m in edge_masks]).numpy()
     gt_flat = torch.cat([m.detach().cpu().view(-1) for m in GT_edge_masks]).numpy()

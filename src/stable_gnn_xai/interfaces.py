@@ -50,6 +50,7 @@ class ModelEvaluation:
 @dataclass
 class ModelRun:
     dataset_root: str
+    model_name: str
     model: GNN
     model_configuration: dict
     details: Optional[dict]
@@ -60,6 +61,7 @@ class ModelRun:
 class Explanation:
     name: str
     explainer: GraphLevelExplainer
+    metadata: dict
     run: ModelRun
     task_type: Optional[str] = None
     edge_masks: Iterable[torch.Tensor] = None

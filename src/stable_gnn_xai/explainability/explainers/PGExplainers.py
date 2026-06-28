@@ -9,6 +9,7 @@ from collections.abc import Iterable
 from loguru import logger
 from torch_geometric.data import Batch
 from abc import ABC, abstractmethod
+from ..proxy_generation import ProxyGraphGenerator
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -157,7 +158,7 @@ class GRUExplanationModule(CustomExplanationModule):
 
 
 class PGExplainer(GraphLevelExplainer):
-    """Standrad PGExplainer Implementation for graph-level binary classification an abritrary explanation module."""
+    """Standard PGExplainer with optional explanatory module and ProxyExplainer proxy-graph mode from Chen et al. (2026)."""
 
     def __init__(
         self,
@@ -172,6 +173,9 @@ class PGExplainer(GraphLevelExplainer):
         reparameterization_samples,
         explanation_module_class: CustomExplanationModule = PGEExplanationModule,
         loss_f=torch.nn.BCELoss(),
+        proxy_generator: ProxyGraphGenerator = None,
+        proxy_lr: float = None,
+        proxy_M: int = 1,
     ):
         super().__init__(model, graphs)
         self.hidden_size = hidden_size
@@ -182,10 +186,17 @@ class PGExplainer(GraphLevelExplainer):
         self.tau = tau
         self.reparameterization_samples = reparameterization_samples
         self.loss_f = loss_f
+        self.proxy_M = proxy_M
+        self.proxy_generator = proxy_generator
+        self.proxy_optimizer = torch.optim.Adam(
+            self.proxy_generator.parameters(), lr=proxy_lr or lr
+        ) if proxy_generator else None 
+        
         self.example_loss_curves = {'BCELoss': [], 'entropy_regularization': [], 'mean_regularization': []}
         self.explanation_module = explanation_module_class(
             model=model, graphs=graphs, hidden_size=hidden_size
         ).to(DEVICE)
+
 
     def explain_graph_task(self):
         model, graphs = self.explanation_module.model, self.explanation_module.graphs
@@ -214,20 +225,45 @@ class PGExplainer(GraphLevelExplainer):
             optimizer.zero_grad()
 
             logit_edge_masks = self.explanation_module.get_explanation()
+            soft_edge_masks = [torch.sigmoid(m) for m in logit_edge_masks]
+
+            # --- ProxyExplainer: inner opt + proxy graph construction (Alg. 2) ---
+            if self.proxy_generator is not None:
+
+                # inner optimization: tra in proxy generator proxy_M steps with explainer fixed
+                logger.debug('running inner optimization for proxy graph generator')
+                for _ in range(self.proxy_M):
+                    self.proxy_optimizer.zero_grad()
+                    gen_loss = sum(
+                        self.proxy_generator(G, mask)[1]
+                        for G, mask in zip(self.graphs, soft_edge_masks)
+                    )
+                    gen_loss.backward()
+                    self.proxy_optimizer.step()
+
+                # build proxy graphs for this epoch's MC estimate
+                logger.debug('running proxy graph construction for MC estimate')
+                proxy_graphs = []
+                for G, mask in zip(self.graphs, soft_edge_masks):
+                    A_tilde, _ = self.proxy_generator(G, mask.detach())
+                    proxy_graphs.append(self.proxy_generator.build_proxy_data(G, A_tilde, mask.detach()))
+                tiled_proxy = [G for G in proxy_graphs for _ in range(self.reparameterization_samples)]
+                eval_batch = Batch.from_data_list(tiled_proxy).to(DEVICE)
+            else:
+                eval_batch = batched
 
             # Subgraph Estimate
             # (tile-parrelelized over graphs and graph samples)
             explanatory_y_preds = _batch_MC_BCE_estimate(
                 tau=self.tau,
                 model=model,
-                tiled_graphs_batch=batched,
+                tiled_graphs_batch=eval_batch,
                 all_edge_mask_logits=logit_edge_masks,
                 samples=self.reparameterization_samples,
                 n_graphs=len(self.graphs)
             )
 
             # regularization
-            soft_edge_masks = [torch.sigmoid(m) for m in logit_edge_masks]
             entropy_reg = (
                 self.entropy_regularization
                 * torch.stack(
@@ -243,6 +279,7 @@ class PGExplainer(GraphLevelExplainer):
             loss = self.loss_f(explanatory_y_preds, y_preds)
             loss += mean_reg + entropy_reg
             loss.backward()
+            optimizer.step()
 
             self.example_loss_curves['BCELoss'].append(loss.item())
             self.example_loss_curves['entropy_regularization'].append(entropy_reg.item())
@@ -254,3 +291,27 @@ class PGExplainer(GraphLevelExplainer):
 
         uniform_debug_log(soft_edge_masks)
         return soft_edge_masks, loss.item()
+    
+
+def grid_search(model, graphs, search_dict: dict) -> list[tuple]:
+    from itertools import product
+    keys, values = zip(*search_dict.items())
+    configs = []
+    for combo in product(*values):
+        params = dict(zip(keys, combo))
+
+        use_proxy = params.pop("use_proxy")
+        proxy_lam = params.pop("proxy_lam", 1.0)
+        proxy_latent = params.pop("proxy_latent", 32)
+
+        params["proxy_generator"] = ProxyGraphGenerator(
+            node_feature_dim=graphs[0].x.shape[1],
+            latent_dim=proxy_latent,
+            lam=proxy_lam,
+        ).to(DEVICE) if use_proxy else None
+
+        configs.append(
+            (params, (PGExplainer(model=model, graphs=graphs, **params)))
+        )
+
+    return configs

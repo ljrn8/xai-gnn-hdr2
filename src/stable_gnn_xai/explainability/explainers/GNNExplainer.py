@@ -80,3 +80,14 @@ class GNNExplainer(GraphLevelExplainer):
 
         uniform_debug_log(masks)
         return masks, loss.item()
+
+
+def grid_search(model, graphs, search_dict: dict) -> list:
+    from itertools import product
+    keys, values = zip(*search_dict.items())
+    return [
+        (
+            dict(zip(keys, combo)), 
+            GNNExplainer(model=model, graphs=graphs, **dict(zip(keys, combo))))
+        for combo in product(*values)
+    ]
