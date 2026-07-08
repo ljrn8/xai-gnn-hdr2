@@ -1,3 +1,4 @@
+import itertools
 import os
 from torch import nn
 import torch.functional as F
@@ -10,9 +11,7 @@ from ..util import openpkl, savepkl
 from ..config import EXPLAINERS, MODELS, FIGURES, DEVICE
 from typing_extensions import Iterable
 import matplotlib.pyplot as plt
-from .explainers.PGExplainers import grid_search as pgexplainer_grid_search
-from .explainers.GNNExplainer import grid_search as gnne_grid_search
-
+import copy
 
 def get_timestamp():
     from datetime import datetime
@@ -36,21 +35,11 @@ def save_cuves(explainer: Explanation, id: str, directory: Path = FIGURES / 'exp
         plt.clf()
 
 
-def apply_grid_search(explainer_class, model, graphs, hyperparameters: dict) -> list:
-    """Applies grid search for the given explainer class and hyperparameters"""
-
-    if explainer_class == "PGExplainer":
-        return pgexplainer_grid_search(model, graphs, hyperparameters)
-    elif explainer_class == "GNNExplainer":
-        return gnne_grid_search(model, graphs, hyperparameters)
-    else:
-        raise ValueError(f"Grid search not implemented for {explainer_class.__name__}")
-
 
 def run_explainers_from_config(
         model_run: ModelRun, 
         output_path: Path,
-        explainers_grid_parameters: dict = EXPLAINERS['explainers'],
+        explainer_configurations: dict = EXPLAINERS['explainers'],
         specify_explainer: str = None
 ):
     """Applies grid search of explainers to model run
@@ -86,24 +75,27 @@ def run_explainers_from_config(
             e == embedding_sizes[0]
         ), f"all latent embeddings must be the same size for an RNN Module"
 
-    
-    # Exhuastive explainer configuration search loop
-    for explainer_name, explainer_config in explainers_grid_parameters.items():
-        if specify_explainer and explainer_name != specify_explainer:
-            logger.info(f'skipping {explainer_name} as unspecified explainer')
+    for explainer_config in explainer_configurations:
+        name = explainer_config['name']
+        explainer_class = explainer_config['explainer']
+        explainer_name = explainer_class.__name__
+        logger.info(f'NAME: {name}, EXPLAINER: {explainer_name}')
+
+        if specify_explainer and name != specify_explainer:
+            logger.info(f'skipping {name} as unspecified explainer name')
             continue
+        
+        grid_dict = explainer_config['grid_search']
 
-        grid = apply_grid_search(
-            explainer_class=explainer_name,
-            model=model,
-            graphs=test_graphs,
-            hyperparameters=explainer_config
-        )
+        # get explainer grid search parameters for each grd search
+        parameter_combinations = [
+            dict(zip(grid_dict.keys(), v)) for v in itertools.product(*grid_dict.values())
+        ]
 
-        logger.info(f'EXPLAINER: {explainer_name}')
-
-        for params, explainer in grid:
+        for params in parameter_combinations:
             logger.debug(f'running parameters for {explainer_name}: {params}')
+
+            explainer = explainer_class(**params)
             masks, penalty = explainer.explain_graph_task()
 
             # add metadata
@@ -111,10 +103,11 @@ def run_explainers_from_config(
             ds_name = Path(model_run.dataset_root).stem
             model_name = Path(model_run.dataset_root).parent.name
             id = f'{explainer_name}_{ds_name}_{model_name}_{ts}'
-            params['penalty'] = penalty
-            params['id'] = id
-            params['model_name'] = model_name
-            params['ds_name'] = ds_name
+            meta = copy.deepcopy(params)
+            meta['penalty'] = penalty
+            meta['id'] = id
+            meta['model_name'] = model_name
+            meta['ds_name'] = ds_name
 
             explanation = Explanation(
                 explainer=explainer,
@@ -122,7 +115,7 @@ def run_explainers_from_config(
                 task_type='graph',
                 edge_masks=masks,
                 name=explainer_name,
-                metadata=params,
+                metadata=meta,
             )
             
             evaluate_explanation(masks, GT_test_edge_masks, figures_id=id)
