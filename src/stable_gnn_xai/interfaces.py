@@ -27,12 +27,8 @@ class GNN(ABC, nn.Module):
 class GraphLevelExplainer(ABC):
     """Simple interface for graph-classifier explainers"""
 
-    def __init__(self, model: GNN, graphs: Iterable[Tensor]):
-        self.model = model
-        self.graphs = graphs
-
     @abstractmethod
-    def explain_graph_task(self):
+    def explain_graph_task(self, model, graphs):
         """Perform graph explanation given abritrary initialization.
 
         Returns:
