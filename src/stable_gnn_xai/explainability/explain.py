@@ -6,7 +6,7 @@ import torch
 from torch_geometric.data import Data
 from loguru import logger
 from pathlib import Path
-from ..interfaces import GNN, Explanation, ModelRun
+from ..interfaces import Explanation, ModelRun
 from ..util import openpkl, savepkl
 from ..config import EXPLAINERS, MODELS, FIGURES, DEVICE
 from typing_extensions import Iterable
@@ -38,16 +38,19 @@ def save_cuves(explainer: Explanation, id: str, directory: Path = FIGURES / 'exp
 
 def run_explainers_from_config(
         model_run: ModelRun, 
-        output_path: Path,
-        explainer_configurations: dict = EXPLAINERS['explainers'],
-        specify_explainer: str = None
+        explainers_config: dict = EXPLAINERS,
+        specify_explainer: str = None,
+        output_path: Path = None,
 ):
-    """Applies grid search of explainers to model run
+    """Applies grid search of explainers to model run from the supplied configuration to a specific model run.
     
     Produces:
-        [output_path]/
-            {explainer_name}_{ds_name}_{model_name}_{timestamp}.pkl
+        [EXPLAINERS['output']] /
+            [model_name] / 
+                [dataset_name] /
+                    {explainer_name}_{timestamp}.pkl (Explanation object)
     """
+    explainer_configurations = explainers_config['explainers']
     graphs = openpkl(model_run.dataset_root)
     GT_test_edge_masks = [g.edge_mask for g in graphs if g.test_mask == 1]
 
@@ -96,13 +99,13 @@ def run_explainers_from_config(
             logger.debug(f'running parameters for {explainer_name}: {params}')
 
             explainer = explainer_class(**params)
-            masks, penalty = explainer.explain_graph_task()
+            masks, penalty = explainer.explain_graph_task(model, test_graphs)
 
             # add metadata
             ts = get_timestamp()
             ds_name = Path(model_run.dataset_root).stem
-            model_name = Path(model_run.dataset_root).parent.name
-            id = f'{explainer_name}_{ds_name}_{model_name}_{ts}'
+            model_name = model_run.model_name
+            id = f'{explainer_name}_{ts}'
             meta = copy.deepcopy(params)
             meta['penalty'] = penalty
             meta['id'] = id
@@ -122,6 +125,10 @@ def run_explainers_from_config(
             explanation.evaluation_metrics['roc_auc'] = evaluate_explanation(
                 explanation.edge_masks, GT_test_edge_masks, figures_id=f"{dataset}_{explainer_name}_best"
             )
+
+            if not output_path:
+                output_path = EXPLAINERS['output'] / model_name / ds_name
+            
             output_path.mkdir(exist_ok=True, parents=True)
             save_cuves(explanation, id=id)
             savepkl(explanation, output_path / f"{id}.pkl")
@@ -157,13 +164,9 @@ def main(args):
     # explain a specifc run
     if args.model_run_path:
         model_run = openpkl(args.model_run_path)
-        model_name = Path(args.model_run_path).parent.name
-        dataset_name = Path(model_run.dataset_root).stem
-
         logger.info(f"\n --> explaining specific model run at path: {args.model_run_path} \n")
         run_explainers_from_config(
             model_run, 
-            output_path=EXPLAINERS['output'] / model_name / dataset_name,
             specify_explainer=args.explainer)
 
     # evaluate existing explanations
@@ -185,6 +188,8 @@ def main(args):
                     model_name = Path(explanation.run.dataset_root).parent.name
                     dataset_name = Path(explanation.run.dataset_root).stem
                     logger.info(f'eval for {explanation.name} on model {model_name} for dataset {dataset_name}')
+                    
+                    # TODO: clean
                     explanation.evaluation_metrics['roc_auc'] = evaluate_explanation(
                         explanation.edge_masks, GT_test_edge_masks, figures_dir =  FIGURES / 'explanations' / model_name, 
                         figures_id=f"{dataset_name}_{explanation.name}best"

@@ -159,7 +159,9 @@ def evaluate(model, test_graphs):
     return y_scores, metrics
 
 
-def configurations_random_search(dataset_path: Path, models_config: Path = MODELS, overwrite: bool = False):
+def configurations_random_search(dataset_path: Path, 
+                                 models_config: Path = MODELS, 
+                                 overwrite: bool = False):
     """Perform random search over model hyperparameters and save results for a single dataset.
 
     Args:
@@ -180,21 +182,23 @@ def configurations_random_search(dataset_path: Path, models_config: Path = MODEL
     graphs = openpkl(dataset_path)
     n_features = graphs[0].x.shape[1]
 
-    for model_name, model_config in models_config["random_search_configurations"].items():
-        hyperparameter_config = model_config['hyperparameters']
-        hp_keys = [k for k in hyperparameter_config.keys() if k != "base_class"]
+    for model_config in models_config["models"]:
+        linear_search = model_config.get('linear_search')
+        name = model_config["name"]
+
+        hp_keys = [k for k in linear_search.keys()]
         model_class = model_config["base_class"]
         done_iterations = set()
         
-        save_path = output_dir / model_name / f"{ds_name}.pkl"
+        save_path = output_dir / name / f"{ds_name}.pkl"
         if save_path.exists() and not overwrite:
-            logger.info(f"Model run already exists for model [{model_name}] on dataset [{ds_name}] at {save_path}, skipping...")
+            logger.info(f"Model run already exists for model [{name}] on dataset [{ds_name}] at {save_path}, skipping...")
             run = openpkl(save_path)
             runs.append(run)
             continue
 
         for i in range(iterations):
-            hp = {k: np.random.choice(hyperparameter_config[k]) for k in hp_keys}
+            hp = {k: np.random.choice(linear_search[k]) for k in hp_keys}
             if tuple(hp.items()) in done_iterations:
                 continue
 
@@ -213,7 +217,7 @@ def configurations_random_search(dataset_path: Path, models_config: Path = MODEL
 
             logger.info(f"model: {model}")
 
-            logger.info(f" > Training model [{model_name}] with hyperparameters: {hp}")
+            logger.info(f" > Training model [{name}] with hyperparameters: {hp}")
             train_loss, val_loss = train(
                 model=model,
                 graphs=graphs,
@@ -230,9 +234,10 @@ def configurations_random_search(dataset_path: Path, models_config: Path = MODEL
         
         save_path.parent.mkdir(parents=True, exist_ok=True)
         logger.info(
-            f"Saving model and results for model [{model_name}] on dataset [{ds_name}] to {save_path}"
+            f"Saving model and results for model [{name}] on dataset [{ds_name}] to {save_path}"
         )
         run = ModelRun(
+            model_name=name,
             dataset_root=str(dataset_path),
             model=best_model,
             model_configuration=hp,
@@ -248,23 +253,24 @@ def configurations_random_search(dataset_path: Path, models_config: Path = MODEL
     return runs
 
 
-def evaluate_model_directory(model_directory: Path):
+def evaluate_model_directory(runs_directory: Path):
     """Evaluate all models in a directory on their respective test sets and save results."""
+    for model_name in os.listdir(runs_directory):
+        dataset_runs_path = runs_directory / model_name
+        for model_file in os.listdir(dataset_runs_path):
+            if not model_file.endswith(".pkl"):
+                continue
 
-    for model_file in os.listdir(model_directory):
-        if not model_file.endswith(".pkl"):
-            continue
-
-        model_run: ModelRun = openpkl(model_directory / model_file)
-        test_graphs = [g for g in openpkl(model_run.dataset_root) if g.test_mask == 1]
-        logger.info(
-            f"Evaluating model {model_file} on test set of dataset {model_run.dataset_root}"
-        )
-        y_scores, metrics = evaluate(model_run.model, test_graphs)
-        model_run.test_evaluation = ModelEvaluation(
-            y_pred_test=y_scores, metrics=metrics
-        )
-        savepkl(model_run, model_directory / model_file)
+            model_run: ModelRun = openpkl(dataset_runs_path / model_file)
+            test_graphs = [g for g in openpkl(model_run.dataset_root) if g.test_mask == 1]
+            logger.info(
+                f"Evaluating model {model_file} on test set of dataset {model_run.dataset_root}"
+            )
+            y_scores, metrics = evaluate(model_run.model, test_graphs)
+            model_run.test_evaluation = ModelEvaluation(
+                y_pred_test=y_scores, metrics=metrics
+            )
+            savepkl(model_run, dataset_runs_path / model_file)
 
 
 def main(args):
@@ -306,7 +312,7 @@ if __name__ == "__main__":
         default=MODELS["output"],
     )
     parser.add_argument(
-        "-e", "--evaluate", action="store_true", help="run evaluation on test set only"
+        "-e", "--evaluate", action="store_true", help="run evaluation on the entire run directory"
     )
     parser.add_argument(
         "-o", "--overwrite", action="store_true", help="overwrite pkl model runs (redo all)"

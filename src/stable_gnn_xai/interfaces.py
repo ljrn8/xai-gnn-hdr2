@@ -7,6 +7,7 @@ import torch.optim as optim
 from typing import Optional, Iterable
 from torch_geometric.data import Data, Batch
 
+
 class GNN(ABC, nn.Module):
     """Interface for GNN models on node-featured static graphs"""
 
@@ -15,13 +16,15 @@ class GNN(ABC, nn.Module):
         """Iterable over all GNN layers (used for explanatory inspections)."""
 
     @abstractmethod
-    def forward(self, x, edge_index, edge_weight=None, return_all_embeddings=False):
+    def forward(self, x, edge_index, edge_weight=None, 
+                return_all_embeddings=False):
         """forward pass a node featured graph.
 
         Returns:
             x (Tensor): model output of graph input.
             embeddings_list (Iterable[Tensor]): If return_all_embeddings=True, retrieves layerwise model embeddings.
         """
+
 
 class GraphLevelExplainer(ABC):
     """Simple interface for graph-classifier explainers"""
@@ -39,20 +42,14 @@ class GraphLevelExplainer(ABC):
 class CustomExplainerModule(ABC, nn.Module):
     """Graph classification interface for PGExplainer-style explanation modules"""
 
-    def __init__(self, model: GNN, graphs: Iterable[Data], hidden_size, output_size):
+    def __init__(self, hidden_size, embedding_size, output_size):
         super().__init__()
         self.output_size = output_size
         self.hidden_size = hidden_size
-        self.model = model
-        self.graphs = graphs
-        self.batch_obj = Batch.from_data_list(graphs)
-        self.embeddings_size = self.embeddings_list[0][0].shape[1]
-        assert hasattr(graphs[0], "x"), "ill formated graphs"
-        assert (
-            self.embeddings_list[0][1].shape[1] == self.embeddings_size
-        ), "embeddings size must be the same for all layers"
+        self.embedding_size = embedding_size
 
-    def get_explanation(self) -> Iterable[torch.Tensor]:
+    @abstractmethod
+    def forward(self, model: GNN, graphs: Iterable[Data]) -> Iterable[torch.Tensor]:
         """Produce edge mask logits per graph"""
 
 
