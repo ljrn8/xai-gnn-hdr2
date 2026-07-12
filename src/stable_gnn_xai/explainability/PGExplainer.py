@@ -1,5 +1,5 @@
-from ..utils import elementwise_entropy, uniform_debug_log
-from ...interfaces import GNN, GraphLevelExplainer
+from .utils import elementwise_entropy, uniform_debug_log
+from ..interfaces import GNN, GraphLevelExplainer, CustomExplainerModule
 import torch
 from torch import Tensor
 import torch.nn as nn
@@ -9,29 +9,10 @@ from collections.abc import Iterable
 from loguru import logger
 from torch_geometric.data import Batch
 from abc import ABC, abstractmethod
-from ..proxy_generation import ProxyGraphGenerator
+from .proxy_generation import ProxyGraphGenerator
+
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-
-def binary_concrete_sample(logits: Tensor, tau: float, samples: int) -> Tensor:
-    """Samples from the Binary Concrete distribution (Maddison et al., 2017) for a given logit tensor.
-
-    Args:
-        logits (Tensor): Logits for the Bernoulli distribution.
-        tau (float): Temperature parameter for the Binary Concrete distribution.
-        samples (int): Number of samples to draw.
-
-    Returns:
-        Tensor: Samples from the Binary Concrete distribution with shape (samples, *logits.shape).
-    """
-    u = torch.rand(samples, *logits.shape, device=logits.device).clamp(1e-6, 1 - 1e-6)
-    log_noise = torch.log(u) - torch.log(1 - u)
-    return torch.sigmoid((logits.unsqueeze(0) + log_noise) / tau)
-
-
-def inverse_gaussian_sample(logits: Tensor, tau: float, samples: int) -> Tensor:
-    ...
 
 
 def get_model_embeddings_batched(model: GNN, graphs: Batch):
@@ -54,34 +35,121 @@ def get_model_embeddings_batched(model: GNN, graphs: Batch):
     return logits.detach(), embeddings_list
 
 
-class CustomExplanationModule(ABC, nn.Module):
-    """Graph classification interface for PGExplainer-style explanation modules"""
+class _CachedCausalLayer(nn.Module):
+    """One causal self-attention block with KV-caching: computes q/k/v for the
+    new token only, appends k/v to the running cache, attends the new query
+    over the full cache (all positions <= current step)."""
 
-    def __init__(self, model: GNN, graphs: Iterable[Data], hidden_size, output_size):
+    def __init__(self, d_model, n_heads):
         super().__init__()
-        self.output_size = output_size
-        self.hidden_size = hidden_size
-        self.model = model
-        self.graphs = graphs
-        batch_obj = Batch.from_data_list(graphs)
-        self.logits, self.embeddings_list = get_model_embeddings_batched(
-            model, batch_obj
+        assert d_model % n_heads == 0
+        self.n_heads = n_heads
+        self.head_dim = d_model // n_heads
+
+        self.q_proj = nn.Linear(d_model, d_model)
+        self.k_proj = nn.Linear(d_model, d_model)
+        self.v_proj = nn.Linear(d_model, d_model)
+        self.out_proj = nn.Linear(d_model, d_model)
+
+        self.norm1 = nn.LayerNorm(d_model)
+        self.norm2 = nn.LayerNorm(d_model)
+        self.ff = nn.Sequential(
+            nn.Linear(d_model, d_model * 4), nn.ReLU(), nn.Linear(d_model * 4, d_model)
         )
-        self.embeddings_size = self.embeddings_list[0][0].shape[1]
-        assert hasattr(graphs[0], "x"), "ill formated graphs"
-        assert (
-            self.embeddings_list[0][1].shape[1] == self.embeddings_size
-        ), "embeddings size must be the same for all layers"
 
-    def get_explanation(self) -> Iterable[torch.Tensor]:
-        """Produce edge mask logits per graph"""
+    def step(self, x_new: Tensor, cache: dict):
+        # x_new: (1, 1, d_model) -- this step's single new token, pre-norm input
+        residual = x_new
+        h = self.norm1(x_new)
+
+        q = self.q_proj(h).view(1, 1, self.n_heads, self.head_dim).transpose(1, 2)
+        k_new = self.k_proj(h).view(1, 1, self.n_heads, self.head_dim).transpose(1, 2)
+        v_new = self.v_proj(h).view(1, 1, self.n_heads, self.head_dim).transpose(1, 2)
+
+        if cache["k"] is None:
+            k, v = k_new, v_new
+        else:
+            k = torch.cat([cache["k"], k_new], dim=2)
+            v = torch.cat([cache["v"], v_new], dim=2)
+        cache["k"], cache["v"] = k, v
+
+        attn_scores = (q @ k.transpose(-2, -1)) / (self.head_dim ** 0.5)  # (1, heads, 1, t)
+        attn_weights = torch.softmax(attn_scores, dim=-1)
+        attn_out = (attn_weights @ v).transpose(1, 2).reshape(1, 1, -1)
+        attn_out = self.out_proj(attn_out)
+
+        x = residual + attn_out
+        x = x + self.ff(self.norm2(x))
+        return x, cache
 
 
-class PGEExplanationModule(CustomExplanationModule):
+class AutoregressiveMaskExplanationModule(CustomExplainerModule):
+    """Autoregressively generates a soft edge mask with causal, KV-cached
+    self-attention. Edge order is a random permutation fixed by `seed`
+    (offset per-graph), for downstream seed-ensembling to cancel order bias.
+
+    Step i's input is [edge_i_embedding, m_{i-1}], where m_{i-1} is the REAL
+    sigmoid mask value produced at step i-1 (m_0 = 0 baseline) -- carried
+    forward explicitly as a scalar, separate from the KV-cache, which only
+    ever stores k/v (valid to cache since causal masking guarantees they never
+    change once computed).
+    """
+
+    def __init__(self, model: GNN, graphs: Iterable[Data], hidden_size, output_size,
+                 seed: int = 0, n_heads: int = 4, n_layers: int = 2):
+        super().__init__(model, graphs, hidden_size, output_size)
+        self.seed = seed
+        self.n_layers = n_layers
+        self.final_embeddings = [e[-1] for e in self.embeddings_list]
+
+        self.input_proj = nn.Linear(self.embeddings_size * 2 + 1, hidden_size)
+        self.layers = nn.ModuleList(
+            [_CachedCausalLayer(hidden_size, n_heads) for _ in range(n_layers)]
+        )
+        self.output_head = nn.Linear(hidden_size, output_size)
+
+    def get_explanation(self):
+        all_logits = []
+        for graph_idx, (G, fe) in enumerate(zip(self.graphs, self.final_embeddings)):
+            src, dst = G.edge_index
+            edge_embeddings = torch.cat([fe[src], fe[dst]], dim=-1)
+            n_edges = edge_embeddings.shape[0]
+            device = edge_embeddings.device
+
+            gen = torch.Generator(device="cpu").manual_seed(self.seed + graph_idx)
+            perm = torch.randperm(n_edges, generator=gen).to(device)
+            inv_perm = torch.argsort(perm)
+            shuffled_embeddings = edge_embeddings[perm]
+
+            caches = [{"k": None, "v": None} for _ in range(self.n_layers)]
+            logits_list = []
+            m_prev = torch.zeros(1, device=device)  # m_0, baseline
+
+            for i in range(n_edges):
+                x_in = torch.cat([shuffled_embeddings[i], m_prev], dim=-1)
+                x = self.input_proj(x_in).view(1, 1, -1)
+
+                for layer_idx, layer in enumerate(self.layers):
+                    x, caches[layer_idx] = layer.step(x, caches[layer_idx])
+
+                logit_i = self.output_head(x.view(-1))       # o_i
+                logits_list.append(logit_i)
+                m_prev = torch.sigmoid(logit_i).mean().view(1)  # m_i, fed to step i+1
+
+            logits = torch.stack(logits_list, dim=0)[inv_perm]  # back to edge_index order
+            all_logits.append(logits)
+
+        return all_logits
+
+
+class PGEExplanationModule(CustomExplainerModule):
     """Default Explanation module for PGExplainer fitting an MLP over a model's final layer embeddings (concatenated for edge embeddings)."""
 
     def __init__(self, model: GNN, graphs: Iterable[Data], hidden_size, output_size):
         super().__init__(model, graphs, hidden_size)
+        self.logits, self.embeddings_list = get_model_embeddings_batched(
+            model, self.batch_obj
+        )
         self.mlp = nn.Sequential(
             nn.Linear(self.embeddings_size * 2, hidden_size),
             nn.ReLU(),
@@ -102,11 +170,14 @@ class PGEExplanationModule(CustomExplanationModule):
         return list(all_masks.split(edge_counts))
 
 
-class ComprehensiveMLPExplanationModule(CustomExplanationModule):
+class ComprehensiveMLPExplanationModule(CustomExplainerModule):
     """Extension of the default PGExplainer module that fits all intermediate model embeddings."""
 
     def __init__(self, model: GNN, graphs: Iterable[Data], hidden_size, output_size):
         super().__init__(model, graphs, hidden_size)
+        self.logits, self.embeddings_list = get_model_embeddings_batched(
+            model, self.batch_obj
+        )
         n_layers = len(self.embeddings_list[0])
         self.mlp = nn.Sequential(
             nn.Linear(self.embeddings_size * 2 * n_layers, hidden_size),
@@ -127,32 +198,39 @@ class ComprehensiveMLPExplanationModule(CustomExplanationModule):
         return list(all_masks.split(edge_counts))
 
 
-class GRUExplanationModule(CustomExplanationModule):
-    """Fits a GRU to all latent model embeddings, concatenating its own final node embeddings prior to a FC layer for mask output."""
+class ContextualGRUExplanationModule(CustomExplainerModule):
+    """Fits a GRU over the sef of final edge (concatenated) embeddings to generate logits"""
 
     def __init__(self, model: GNN, graphs: Iterable[Data], hidden_size, output_size):
         super().__init__(model, graphs, hidden_size)
+        self.logits, self.embeddings_list = get_model_embeddings_batched(
+            model, self.batch_obj
+        )
         embeddings_size = self.embeddings_list[0][0].shape[1]
         self.gru = nn.GRU(
-            input_size=embeddings_size,
+            input_size=embeddings_size * 2,
             hidden_size=hidden_size,
+            batch_first=True,
         )
-        self.fc = nn.Linear(hidden_size * 2, output_size)
+        self.fc = nn.Linear(hidden_size, output_size)
 
     def get_explanation(self):
         all_edge_embeddings = []
         edge_counts = []
         for G, embeddings_layer_list in zip(self.graphs, self.embeddings_list):
             src, dst = G.edge_index
-            embeddings_layer_sequence = torch.stack(embeddings_layer_list)
-            _, h_n = self.gru(embeddings_layer_sequence)
-            node_representations = h_n[0]
-            all_edge_embeddings.append(torch.cat([node_representations[src], node_representations[dst]], dim=-1))
+            final_embeddings = embeddings_layer_list[-1]
+            edge_embeds = torch.cat([final_embeddings[src], final_embeddings[dst]], dim=-1)
+            all_edge_embeddings.append(edge_embeds.unsqueeze(0))  # Add batch dimension
             edge_counts.append(G.edge_index.shape[1])
 
-        # GRU shares weights so we can batch the FC call across all graphs
-        all_masks = self.fc(torch.cat(all_edge_embeddings, dim=0))
+        # Stack all edge embeddings into a single tensor for GRU processing
+        all_edge_embeddings_tensor = torch.cat(all_edge_embeddings, dim=0)  # Shape: (num_graphs, num_edges, embedding_dim)
+        gru_output, _ = self.gru(all_edge_embeddings_tensor)  # Shape: (num_graphs, num_edges, hidden_size)
+        all_masks = self.fc(gru_output)  # Shape: (num_graphs, num_edges, output_size)
+
         return list(all_masks.split(edge_counts))
+
 
 
 class PGExplainer(GraphLevelExplainer):
@@ -189,16 +267,42 @@ class PGExplainer(GraphLevelExplainer):
         self.example_loss_curves = {'BCELoss': [], 'entropy_regularization': [], 'mean_regularization': []}
         
         self.sampler_method = {
-            'GS': binary_concrete_sample,
-            'IGR': inverse_gaussian_sample
+            'GS': self._GS_sample,
+            'IGR': self._IGR_sample
         }[sampler_method]
 
         self.explanation_module_class = {
             'default': PGEExplanationModule,
             'comprehensive': ComprehensiveMLPExplanationModule,
-            'gru': GRUExplanationModule
+            'contextual': ContextualGRUExplanationModule
         }[explanation_module]
 
+    def _GS_sample(self, logits: Tensor, samples: int) -> Tensor:
+        """Samples from the Binary Concrete distribution (Maddison et al., 2017) for a given logit tensor. (gumbel softmax for binary simplex)
+
+        Args:
+            logits (Tensor): Logits for the Bernoulli distribution.
+            tau (float): Temperature parameter for the Binary Concrete distribution.
+            samples (int): Number of samples to draw.
+
+        Returns:
+            Tensor: Samples from the Binary Concrete distribution with shape (samples, *logits.shape).
+        """
+        u = torch.rand(samples, *logits.shape, device=logits.device).clamp(1e-6, 1 - 1e-6)
+        log_noise = torch.log(u) - torch.log(1 - u)
+        masks = torch.sigmoid((logits.unsqueeze(0) + log_noise) / self.tau)
+        return masks
+
+    def _IGR_sample(self, logits: Tensor, samples: int) -> Tensor:
+        # required to output std and variance
+        assert logits.shape[1] == 2, "logits must have shape (n_edges, 2) for inverse gaussian sampling"
+        mu = logits[:, 0]  
+        # softplus to ensure std is positive
+        std = torch.nn.functional.softplus(logits[:, 1]) + 1e-6 
+        # acquire epislon from a normal distribution 
+        guassian_noise = torch.randn(samples, logits.shape[0], device=logits.device)
+        masks = torch.sigmoid(mu + std * guassian_noise)
+        return masks
 
     def _tile_graphs(self, graphs: Iterable[Data]):
         logger.info('Tiling graphs for Monte Carlo sampling')
@@ -209,19 +313,15 @@ class PGExplainer(GraphLevelExplainer):
         return tiled
 
     def entropy_regularization(self, soft_edge_masks):
-        return (
-            self.entropy_regularization
-                * torch.stack(
-                    [elementwise_entropy(m).mean() for m in soft_edge_masks]
-                ).mean()
-        )
-    
+        return self.entropy_regularization * torch.stack(
+            [elementwise_entropy(m).mean() for m in soft_edge_masks]
+        ).mean()
+        
     def mean_regularization(self, soft_edge_masks):
-        return (
-            self.mean_regularization
-                * torch.stack([m.mean() for m in soft_edge_masks]).mean()
-        )
-
+        return self.mean_regularization* torch.stack(
+            [m.mean() for m in soft_edge_masks]
+        ).mean()
+        
     def _proxy_generator_inner_optimization(self, soft_edge_masks):
         logger.debug('running inner optimization for proxy graph generator')
         for _ in range(self.proxy_M):
@@ -250,7 +350,7 @@ class PGExplainer(GraphLevelExplainer):
             tiled_graphs_batch: Batch, 
             all_edge_mask_logits,
             n_graphs,
-            hard_mask_generator=binary_concrete_sample
+            hard_mask_generator=_GS_sample
     ):
         """Parrallel Monte Carlo Binary Concrete Distribution estimation for 
         subgraph predictions using a logit (attribution) edge mask"""
@@ -258,7 +358,7 @@ class PGExplainer(GraphLevelExplainer):
         # for each graph, sample noise and compute hard masks
         edge_weights = []
         for logits in all_edge_mask_logits:
-            hard = hard_mask_generator(logits.squeeze(), self.tau, self.reparameterization_samples)  
+            hard = hard_mask_generator(logits, self.reparameterization_samples)  
             edge_weights.append(hard.reshape(-1))  # (samples * n_edges,)
         
         edge_weight = torch.cat(edge_weights)  # matches batched edge_index ordering
@@ -275,7 +375,7 @@ class PGExplainer(GraphLevelExplainer):
         is_exp_masks, 
         proxy_edge_counts,
         n_graphs,
-        hard_mask_generator=binary_concrete_sample
+        hard_mask_generator=_GS_sample
     ):
         """Same as _batched_estimation, but edge_weight is built to match the proxy
         graph's edge_index instead of the original graph's: edges kept from G_exp reuse
@@ -285,7 +385,7 @@ class PGExplainer(GraphLevelExplainer):
         """
         edge_weights = []
         for logits, is_exp, n_proxy_edges in zip(all_edge_mask_logits, is_exp_masks, proxy_edge_counts):
-            hard = hard_mask_generator(logits.squeeze(), self.tau, self.reparameterization_samples)  
+            hard = hard_mask_generator(logits, self.reparameterization_samples)  
             exp_weight = hard[:, is_exp]  # (samples, n_exp_edges)
             n_new_edges = n_proxy_edges - exp_weight.shape[1]
             new_weight = torch.ones(self.reparameterization_samples, n_new_edges, device=logits.device)

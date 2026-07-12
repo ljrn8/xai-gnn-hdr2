@@ -1,12 +1,12 @@
 from .training.models import WeightedNodeGCN, WeightedNodeGIN
-from .explainability.explainers.PGExplainers import (
+from .explainability.PGExplainer import (
     PGExplainer, 
     PGEExplanationModule,
     ComprehensiveMLPExplanationModule, 
     GRUExplanationModule
 )
-from .explainability.explainers.RandomExplainer import RandomExplainer
-from .explainability.explainers.GNNExplainer import GNNExplainer
+from .explainability.RandomExplainer import RandomExplainer
+from .explainability.GNNExplainer import GNNExplainer
 from pathlib import Path
 import torch
 from loguru import logger
@@ -55,7 +55,7 @@ EXPLAINERS = {
                 'epochs':                       [100],
                 'entropy_regularization':       [0.1],
                 'mean_regularization':          [0.1],
-                "explanation_module_class":     [PGEExplanationModule],
+                "explanation_module_class":     ['default'],
             },
         }
     ]

@@ -1,5 +1,5 @@
-from ..utils import elementwise_entropy, uniform_debug_log
-from ...interfaces import GNN, GraphLevelExplainer
+from .utils import elementwise_entropy, uniform_debug_log
+from ..interfaces import GNN, GraphLevelExplainer
 from torch_geometric.data import Data
 from typing_extensions import Iterable
 import torch
@@ -13,20 +13,13 @@ class GNNExplainer(GraphLevelExplainer):
 
     def __init__(
         self,
-        model: GNN,
-        graphs: list[Data],
         epochs,
         lr,
         mean_regularization,
         entropy_regularization,
         loss_f=torch.nn.BCELoss(),
     ):
-        for p in model.parameters():
-            p.requires_grad_(False)
-
-        self.model = model.to(DEVICE)
         self.model.eval()
-        self.graphs = graphs
         self.epochs = epochs
         self.lr = lr
         self.mean_regularization = mean_regularization
@@ -34,9 +27,14 @@ class GNNExplainer(GraphLevelExplainer):
         self.loss_f = loss_f
         self.example_loss_curves = {'BCELoss': [], 'entropy_regularization': [], 'mean_regularization': []}
 
-    def explain_graph_task(self):
-        logger.info(f"GNNE About to sequentially fit {len(self.graphs)} graphs")
-        pbar = tqdm(self.graphs)
+    def explain_graph_task(self, model, graphs):
+        for p in model.parameters():
+            p.requires_grad_(False)
+
+        model.to(DEVICE)
+
+        logger.info(f"GNNE About to sequentially fit {len(graphs)} graphs")
+        pbar = tqdm(graphs)
         masks = []
 
         for i, G in enumerate(pbar):
@@ -45,13 +43,13 @@ class GNNExplainer(GraphLevelExplainer):
             optimizer = torch.optim.Adam([parameterized_edge_mask], lr=self.lr)
 
             original_y_pred = (
-                self.model.forward(G.x, G.edge_index).detach().view(-1).sigmoid()
+                model.forward(G.x, G.edge_index).detach().view(-1).sigmoid()
             )
             
             for epoch in range(1, self.epochs + 1):
                 optimizer.zero_grad()
                 explanatatory_y_preds = (
-                    self.model.forward(G.x, G.edge_index, edge_weight=parameterized_edge_mask.sigmoid())
+                    model.forward(G.x, G.edge_index, edge_weight=parameterized_edge_mask.sigmoid())
                     .view(-1)
                     .sigmoid()
                 )
@@ -81,13 +79,3 @@ class GNNExplainer(GraphLevelExplainer):
         uniform_debug_log(masks)
         return masks, loss.item()
 
-
-def grid_search(model, graphs, search_dict: dict) -> list:
-    from itertools import product
-    keys, values = zip(*search_dict.items())
-    return [
-        (
-            dict(zip(keys, combo)), 
-            GNNExplainer(model=model, graphs=graphs, **dict(zip(keys, combo))))
-        for combo in product(*values)
-    ]

@@ -133,7 +133,7 @@ def evaluate_explanation(
     figures_id: str,
     figures_dir: Path = FIGURES / 'explanations'
 ):
-    """"Evaluates ROC-AUC against binary GT edge masks & writes mask histogram
+    """Evaluates ROC-AUC against binary GT edge masks & writes mask histogram
     
     Returns:
         roc_auc (float)
