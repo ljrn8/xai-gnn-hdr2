@@ -13,7 +13,12 @@ logger.info(f"config.py using device: {DEVICE}")
 
 SEED = 0
 FIGURES = Path("output/figures")
-DATASETS = {"output": Path("Data"), "test_split": 0.2, "validation_split": 0.2}
+
+DATASETS = {
+    "output": Path("Data"), 
+    "test_split": 0.2, 
+    "validation_split": 0.2
+}
 
 MODELS = {
     "output": Path("output/runs"),
@@ -49,14 +54,14 @@ EXPLAINERS = {
             'name': 'debugging',
             'explainer': PGExplainer,
             'grid_search': {
-                'tau':                          [0.5, 1, 0.1],
-                'reparameterization_samples':   [30],
-                'lr':                           [0.01, 0.5],
+                'tau':                          [1],
+                'reparameterization_samples':   [50],
+                'lr':                           [0.01],
                 'hidden_size':                  [64],
                 'epochs':                       [100],
-                'entropy_regularization':       [0.01],
-                'mean_regularization':          [0.01],
-                "explanation_module":           ['default'],
+                'entropy_regularization':       [0.05],
+                'mean_regularization':          [0.1],
+                "use_proxy_graphs":             [True],
             },
         }
     ]

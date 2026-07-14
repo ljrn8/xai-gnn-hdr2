@@ -21,11 +21,11 @@ class _GCNEncoder(nn.Module):
     def __init__(self, in_channels: int, out_channels: int):
         super().__init__()
         self.conv1 = GCNConv(in_channels, out_channels)
-        self.conv2 = GCNConv(out_channels, out_channels)
+        self.conv2 = GCNConv(in_channels=out_channels, out_channels=out_channels)  # unchanged
 
-    def forward(self, x: Tensor, edge_index: Tensor) -> Tensor:
-        x = F.relu(self.conv1(x, edge_index))
-        return self.conv2(x, edge_index)
+    def forward(self, x: Tensor, edge_index: Tensor, edge_weight: Tensor = None) -> Tensor:
+        x = F.relu(self.conv1(x, edge_index, edge_weight=edge_weight))
+        return self.conv2(x, edge_index, edge_weight=edge_weight)
 
 
 def _decode(z: Tensor) -> Tensor:
@@ -64,35 +64,25 @@ class ProxyGraphGenerator(nn.Module):
 
 
     def forward(self, G: Data, soft_mask: Tensor):
-        """
-        Returns:
-            A_tilde: (n, n) proxy adjacency probabilities
-            loss:    L_gen scalar
-        """
         n = G.x.shape[0]
         x = G.x.float()
         edge_index = G.edge_index
 
-        is_exp = (soft_mask.detach().squeeze() > 0.5).view(-1).squeeze()
-        exp_ei = edge_index[:, is_exp]
-        non_exp_ei = edge_index[:, ~is_exp]
+        exp_weight = soft_mask.view(-1)          # A' — continuous, no threshold
+        delta_weight = 1.0 - exp_weight          # A∆ = A - A'  (eq. matches paper exactly)
 
-        # fallback to full graph if either split is empty (avoids empty GCN)
-        enc_exp_ei = exp_ei if exp_ei.shape[1] > 0 else edge_index
-        enc_non_ei = non_exp_ei if non_exp_ei.shape[1] > 0 else edge_index
-
-        # GAE on G_exp (eq. 13)
-        z_exp = self.gae_enc(x, enc_exp_ei)
+        # GAE on full graph, weighted by A' (eq. 13-14)
+        z_exp = self.gae_enc(x, edge_index, edge_weight=exp_weight)
         A_tilde_exp = _decode(z_exp)
 
-        # VGAE on G_delta (eq. 14-15)
-        mu = self.vgae_enc_mu(x, enc_non_ei)
-        logvar = self.vgae_enc_logvar(x, enc_non_ei)
+        # VGAE on full graph, weighted by A∆ (eq. 14-15)
+        mu = self.vgae_enc_mu(x, edge_index, edge_weight=delta_weight)
+        logvar = self.vgae_enc_logvar(x, edge_index, edge_weight=delta_weight)
         z_delta = mu + torch.exp(0.5 * logvar) * torch.randn_like(mu)
         A_tilde_delta = _decode(z_delta)
 
-        # eq. 16
-        A_tilde = (A_tilde_exp + A_tilde_delta).clamp(0, 1)
+        A_tilde = (A_tilde_exp + A_tilde_delta).clamp(0, 1)   # eq. 16
+        ...  # L_in / L_kl unchanged — A_orig target stays binary ground truth
 
         # L_in (eq. 11) — weighted BCE against original adjacency
         A_orig = _adj(edge_index, n)
@@ -106,18 +96,16 @@ class ProxyGraphGenerator(nn.Module):
 
         return A_tilde, L_in + self.lam * L_kl
 
+
     def build_proxy_data(self, G: Data, A_tilde: Tensor, soft_mask: Tensor,
                          threshold: float = 0.5) -> Data:
         """Threshold A_tilde into a Data object, always keeping G_exp edges."""
-        edge_index = G.edge_index
-        is_exp = (soft_mask.detach().squeeze() > 0.5).view(-1)
-        exp_ei = edge_index[:, is_exp]
 
         # threshold proxy, zero out exp region to avoid double-counting
-        proxy_adj = (A_tilde.detach() > threshold).float()
-        if exp_ei.shape[1] > 0:
-            proxy_adj[exp_ei[0], exp_ei[1]] = 0.0
-
-        new_ei = proxy_adj.nonzero(as_tuple=False).t()
-        proxy_ei = torch.cat([exp_ei, new_ei], dim=1) if exp_ei.shape[1] > 0 else new_ei
-        return Data(x=G.x, edge_index=proxy_ei, y=G.y)
+        n = A_tilde.shape[0]
+        edge_index = torch.stack(torch.meshgrid(
+            torch.arange(n, device=A_tilde.device),
+            torch.arange(n, device=A_tilde.device), indexing='ij'
+        )).reshape(2, -1)
+        edge_weight = A_tilde.reshape(-1)
+        return Data(x=G.x, edge_index=edge_index, edge_attr=edge_weight, y=G.y)

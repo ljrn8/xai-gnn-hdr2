@@ -42,7 +42,7 @@ class GraphLevelExplainer(ABC):
 class CustomExplainerModule(ABC, nn.Module):
     """Graph classification interface for PGExplainer-style explanation modules"""
 
-    def __init__(self, hidden_size, embedding_size, output_size):
+    def __init__(self, hidden_size, embedding_size, output_size, **kwargs):
         super().__init__()
         self.output_size = output_size
         self.hidden_size = hidden_size

@@ -11,9 +11,7 @@ from torch_geometric.data import Batch
 from abc import ABC, abstractmethod
 from .proxy_generation import ProxyGraphGenerator
 
-
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
 
 def get_model_embeddings_batched(model: GNN, graphs: Batch):
     """Detatched lists of the node embeddings for a batched forward for each intermediate layer.
@@ -101,8 +99,9 @@ class AutoregressiveMaskExplanationModule(CustomExplainerModule):
                  output_size,
                  seed: int = 0, 
                  n_heads: int = 4, 
-                 n_layers: int = 2):
-        
+                 n_layers: int = 2,
+                  **kwargs
+    ):
         super().__init__(hidden_size, embedding_size, output_size)
         
         self.seed = seed
@@ -156,7 +155,7 @@ class AutoregressiveMaskExplanationModule(CustomExplainerModule):
 class PGEExplanationModule(CustomExplainerModule):
     """Default Explanation module for PGExplainer fitting an MLP over a model's final layer embeddings (concatenated for edge embeddings)."""
 
-    def __init__(self, hidden_size, embedding_size, output_size):
+    def __init__(self, hidden_size, embedding_size, output_size, **kwargs):
         super().__init__(hidden_size, embedding_size, output_size)
         self.mlp = nn.Sequential(
             nn.Linear(embedding_size * 2, self.hidden_size),
@@ -185,10 +184,10 @@ class PGEExplanationModule(CustomExplainerModule):
 class ComprehensiveMLPExplanationModule(CustomExplainerModule):
     """Extension of the default PGExplainer module that fits all intermediate model embeddings."""
 
-    def __init__(self, hidden_size, embedding_size, output_size):
+    def __init__(self, hidden_size, embedding_size, output_size, n_layers, **kwargs):
         super().__init__(hidden_size, embedding_size, output_size)
         self.mlp = nn.Sequential(
-            nn.Linear(embedding_size * 2, self.hidden_size),
+            nn.Linear(embedding_size * 2 * n_layers, self.hidden_size),
             nn.ReLU(),
             nn.Linear(self.hidden_size, self.output_size),
         )
@@ -197,7 +196,6 @@ class ComprehensiveMLPExplanationModule(CustomExplainerModule):
         _, embeddings_list = get_model_embeddings_batched(
             model,  Batch.from_data_list(graphs).to(DEVICE)
         )
-
         all_edge_embeddings = []
         edge_counts = []
         for G, layer_embeddings_list in zip(graphs, embeddings_list):
@@ -213,7 +211,7 @@ class ComprehensiveMLPExplanationModule(CustomExplainerModule):
 class ContextualGRUExplanationModule(CustomExplainerModule):
     """Fits a GRU over the sef of final edge (concatenated) embeddings to generate logits"""
 
-    def __init__(self, hidden_size, embedding_size, output_size):
+    def __init__(self, hidden_size, embedding_size, output_size, **kwargs):
         super().__init__(hidden_size, embedding_size, output_size)
         self.gru = nn.GRU(
             input_size=embedding_size * 2,
@@ -222,25 +220,36 @@ class ContextualGRUExplanationModule(CustomExplainerModule):
         )
         self.fc = nn.Linear(hidden_size, output_size)
 
+
     def forward(self, model, graphs):
         _, embeddings_list = get_model_embeddings_batched(
-            model,  Batch.from_data_list(graphs).to(DEVICE)
+            model, Batch.from_data_list(graphs).to(DEVICE)
         )
-        all_edge_embeddings = []
+
+        from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence
+
+        per_graph_edge_embeds = []
         edge_counts = []
         for G, embeddings_layer_list in zip(graphs, embeddings_list):
             src, dst = G.edge_index
             final_embeddings = embeddings_layer_list[-1]
             edge_embeds = torch.cat([final_embeddings[src], final_embeddings[dst]], dim=-1)
-            all_edge_embeddings.append(edge_embeds.unsqueeze(0))  # Add batch dimension
-            edge_counts.append(G.edge_index.shape[1])
+            per_graph_edge_embeds.append(edge_embeds)          # (n_edges_i, dim) -- no unsqueeze
+            edge_counts.append(edge_embeds.shape[0])
 
-        # Stack all edge embeddings into a single tensor for GRU processing
-        all_edge_embeddings_tensor = torch.cat(all_edge_embeddings, dim=0)  # Shape: (num_graphs, num_edges, embedding_dim)
-        gru_output, _ = self.gru(all_edge_embeddings_tensor)  # Shape: (num_graphs, num_edges, hidden_size)
-        all_masks = self.fc(gru_output)  # Shape: (num_graphs, num_edges, output_size)
+        # pad to (num_graphs, max_edges, dim)
+        padded = pad_sequence(per_graph_edge_embeds, batch_first=True)  # zero-padded
+        lengths = torch.tensor(edge_counts)
 
-        return list(all_masks.split(edge_counts))
+        packed = pack_padded_sequence(padded, lengths.cpu(), batch_first=True, enforce_sorted=False)
+        packed_out, _ = self.gru(packed)
+        gru_output, _ = pad_packed_sequence(packed_out, batch_first=True)  # (num_graphs, max_edges, hidden)
+
+        all_masks = self.fc(gru_output)  # (num_graphs, max_edges, output_size)
+
+        # strip padding per graph before returning, to match the flat/list-of-tensors convention
+        # used elsewhere (each entry shape (n_edges_i, output_size))
+        return [all_masks[i, :edge_counts[i]] for i in range(len(graphs))]
 
 
 class PGExplainer(GraphLevelExplainer):
@@ -288,6 +297,7 @@ class PGExplainer(GraphLevelExplainer):
             'contextual': ContextualGRUExplanationModule
         }[explanation_module]
 
+
     def _GS_sample(self, logits: Tensor, samples: int) -> Tensor:
         """Samples from the Binary Concrete distribution (Maddison et al., 2017) for a given logit tensor. (gumbel softmax for binary simplex)
 
@@ -304,6 +314,7 @@ class PGExplainer(GraphLevelExplainer):
         masks = torch.sigmoid((logits.unsqueeze(0) + log_noise) / self.tau)
         return masks
 
+
     def _IGR_sample(self, logits: Tensor, samples: int) -> Tensor:
         # required to output std and variance
         assert logits.shape[1] == 2, "logits must have shape (n_edges, 2) for inverse gaussian sampling"
@@ -315,6 +326,7 @@ class PGExplainer(GraphLevelExplainer):
         masks = torch.sigmoid(mu + std * guassian_noise)
         return masks
 
+
     def _tile_graphs(self, graphs: Iterable[Data]):
         logger.info('Tiling graphs for Monte Carlo sampling')
         tiled_graphs = [G for G in graphs for _ in range(self.reparameterization_samples)]
@@ -323,60 +335,78 @@ class PGExplainer(GraphLevelExplainer):
         logger.info('done')
         return tiled
 
+
     def entropy_regularizer(self, soft_edge_masks):
         return self.entropy_regularization * torch.stack(
             [elementwise_entropy(m).mean() for m in soft_edge_masks]
         ).mean()
         
+
     def mean_regularizer(self, soft_edge_masks):
-        return self.mean_regularization* torch.stack(
+        return self.mean_regularization * torch.stack(
             [m.mean() for m in soft_edge_masks]
         ).mean()
         
-    def _proxy_generator_inner_optimization(self, soft_edge_masks):
-        logger.debug('running inner optimization for proxy graph generator')
+
+    def _proxy_generator_inner_optimization(self, graphs, edge_masks):
         for _ in range(self.proxy_M):
             self.proxy_optimizer.zero_grad()
             gen_loss = sum(
-                self.proxy_generator(G, mask)[1]
-                for G, mask in zip(self.graphs, soft_edge_masks)
+                self.proxy_generator.forward(G, mask)[1]
+                for G, mask in zip(graphs, edge_masks)
             )
             gen_loss.backward()
             self.proxy_optimizer.step()
 
-    def _proxy_generator_build_proxy_graphs(self, soft_edge_masks):
-        logger.debug('running proxy graph construction for MC estimate')
+    def _proxy_generator_build_proxy_graphs(self, graphs, edge_masks):
         proxy_graphs = []
-        is_exp_masks = []
-        for G, mask in zip(self.graphs, soft_edge_masks):
+        for G, mask in zip(graphs, edge_masks):
             A_tilde, _ = self.proxy_generator(G, mask.detach())
             proxy_graphs.append(self.proxy_generator.build_proxy_data(G, A_tilde, mask.detach()))
-            is_exp_masks.append((mask.detach().squeeze() > 0.5).view(-1))
 
-        return proxy_graphs, is_exp_masks
+        return proxy_graphs
+    
 
-    def _batched_estimation(
+    def _batched_reparameterization_estimate(
             self,
             model, 
+            logit_edge_masks,
             tiled_graphs_batch: Batch, 
-            all_edge_mask_logits,
-            n_graphs,
-            hard_mask_generator=_GS_sample
+            hard_mask_sampler=_GS_sample,
     ):
         """Parrallel Monte Carlo Binary Concrete Distribution estimation for 
-        subgraph predictions using a logit (attribution) edge mask"""
+        subgraph predictions using a logit (attribution) edge mask, optionally generating proxy graphs on each sample"""
         
         # for each graph, sample noise and compute hard masks
-        edge_weights = []
-        for logits in all_edge_mask_logits:
-            hard = hard_mask_generator(logits, self.reparameterization_samples)  
-            edge_weights.append(hard.reshape(-1))  # (samples * n_edges,)
-        
-        edge_weight = torch.cat(edge_weights)  # matches batched edge_index ordering
-        scores = torch.sigmoid(model(tiled_graphs_batch.x, 
-                                    tiled_graphs_batch.edge_index, edge_weight=edge_weight, batch=tiled_graphs_batch.batch))
+        hard_edge_weights = []
+        for logits in logit_edge_masks:
+            hard = hard_mask_sampler(logits, self.reparameterization_samples)  
+            hard_edge_weights.append(hard.reshape(-1))  # (samples * n_edges,)
 
-        return scores.view(n_graphs, self.reparameterization_samples).mean(dim=1)  # (N,)
+        hard_edge_weights = torch.cat(hard_edge_weights)  # matches batched edge_index ordering
+        
+        if self.use_proxy_graphs:
+            self._proxy_generator_inner_optimization(tiled_graphs_batch, hard_edge_weights)
+            proxy_graphs = self._proxy_generator_build_proxy_graphs(tiled_graphs_batch, hard_edge_weights)
+
+            # TODO: match proxy_graphs list and tiled graphs batch (make it a bathc object aswell)
+            preds = model(
+                proxy_graphs.x, 
+                proxy_graphs.edge_index,
+                batch=tiled_graphs_batch.batch
+            )
+
+        else:
+            preds = model(
+                tiled_graphs_batch.x, 
+                tiled_graphs_batch.edge_index,
+                edge_weight=hard_edge_weights, 
+                batch=tiled_graphs_batch.batch
+            )
+
+        scores = torch.sigmoid(preds)
+        return scores.view(len(logit_edge_masks), self.reparameterization_samples).mean(dim=1)  # (N,)
+
 
     def _proxy_batched_estimation(
         self,
@@ -397,10 +427,12 @@ class PGExplainer(GraphLevelExplainer):
         edge_weights = []
         for logits, is_exp, n_proxy_edges in zip(all_edge_mask_logits, is_exp_masks, proxy_edge_counts):
             hard = hard_mask_generator(logits, self.reparameterization_samples)  
+            if hard.dim() == 3:
+                hard = hard.squeeze(-1) 
+
             exp_weight = hard[:, is_exp]  # (samples, n_exp_edges)
             n_new_edges = n_proxy_edges - exp_weight.shape[1]
             new_weight = torch.ones(self.reparameterization_samples, n_new_edges, device=logits.device)
-
             edge_weights.append(torch.cat([exp_weight, new_weight], dim=1).reshape(-1))
 
         edge_weight = torch.cat(edge_weights)  # matches batched proxy edge_index ordering
@@ -409,17 +441,21 @@ class PGExplainer(GraphLevelExplainer):
 
         return scores.view(n_graphs, self.reparameterization_samples).mean(dim=1)  # (N,)
 
+
     def explain_graph_task(self, model, graphs):
 
         logger.info('testing example prediction on graphs[0] ..')
         _, embs_list = model(graphs[0].x, graphs[0].edge_index, return_all_embeddings=True)
         layerwise_embedddings_dimensions = [e.shape[1] for e in embs_list]
         embedding_size = layerwise_embedddings_dimensions[-1]
+        n_layers = len(embs_list)
+        logger.debug(f'embeddings size: {embedding_size}')
 
         self.explanation_module = self.explanation_module_class(
             hidden_size=self.hidden_size, 
             output_size=2 if self.sampler_method == 'IGR' else 1,
-            embedding_size=embedding_size
+            embedding_size=embedding_size,
+            n_layers=n_layers
         ).to(DEVICE)
 
         if self.use_proxy_graphs:
@@ -448,48 +484,24 @@ class PGExplainer(GraphLevelExplainer):
         for epc in pbar:
             optimizer.zero_grad()
             logit_edge_masks = self.explanation_module.forward(model, graphs)
-
             for m, g in zip(logit_edge_masks, graphs):
                 assert m.shape[0] == g.edge_index.shape[1], f"mask shape {m.shape} does not match graph edge count {g.edge_index.shape}"
 
             soft_edge_masks = [torch.sigmoid(m) for m in logit_edge_masks]
 
-            if self.use_proxy_graphs:
-                self._proxy_generator_inner_optimization(soft_edge_masks)
-                proxy_graphs, is_exp_masks = self._proxy_generator_build_proxy_graphs(soft_edge_masks)
-                proxy_edge_counts = [G.edge_index.shape[1] for G in proxy_graphs]
-                tiled_proxy = [G for G in proxy_graphs for _ in range(self.reparameterization_samples)]
-                eval_batch = Batch.from_data_list(tiled_proxy).to(DEVICE)
-
-                # Subgraph Estimate against the proxy graph
-                explanatory_y_preds = self._proxy_batched_estimation(
-                    model=model,
-                    tiled_graphs_batch=eval_batch,
-                    all_edge_mask_logits=logit_edge_masks,
-                    is_exp_masks=is_exp_masks,
-                    proxy_edge_counts=proxy_edge_counts,
-                    n_graphs=len(graphs),
-                    hard_mask_generator=self.sampler
-                )
-
-            else:
-                # Subgraph Estimate
-                explanatory_y_preds = self._batched_estimation(
-                    model=model,
-                    tiled_graphs_batch=tiled,
-                    all_edge_mask_logits=logit_edge_masks,
-                    n_graphs=len(graphs),
-                    hard_mask_generator=self.sampler
-                )
+            # perturbed graph estimation (core entry point)
+            explanatory_y_preds = self._batched_reparameterization_estimate(
+                model=model,
+                tiled_graphs_batch=tiled,
+                logit_edge_masks=logit_edge_masks,
+                hard_mask_sampler=self.sampler
+            )
 
             # regularization
             entropy_reg = self.entropy_regularizer(soft_edge_masks)
-            mean_reg = self.entropy_regularizer(soft_edge_masks)
-            
+            mean_reg = self.mean_regularizer(soft_edge_masks)
+
             loss = self.loss_f(explanatory_y_preds, y_preds)
-            loss += mean_reg + entropy_reg
-            loss.backward()
-            optimizer.step()
 
             self.example_loss_curves['BCELoss'].append(loss.item())
             self.example_loss_curves['entropy_regularization'].append(entropy_reg.item())
@@ -499,5 +511,13 @@ class PGExplainer(GraphLevelExplainer):
                 f"PGExplainer @ epc {epc} | BCEloss={loss.item():.5f} | entropy_reg={entropy_reg:.5f} | mean_reg={mean_reg:.5f}"
             )
 
-        uniform_debug_log(soft_edge_masks)
+            loss += mean_reg + entropy_reg
+            loss.backward()
+            optimizer.step()
+            
+        if sum(soft_edge_masks[0]) < 0.1 or 1 - sum(soft_edge_masks[0]) < 0.1:
+            logger.debug('found uniform edge masks with delta 0.1')
+        else:
+            uniform_debug_log(soft_edge_masks)
+        
         return soft_edge_masks, loss.item()

@@ -153,9 +153,14 @@ def evaluate_explanation(
     logger.info(f"ROC AUC of explanation: {roc_auc:.4f}")
 
     figures_dir.mkdir(exist_ok=True, parents=True)
-    plt.hist(masks_flat, bins=50)
-    plt.savefig(figures_dir / f"{figures_id}_explanation_histogram.png")
-    plt.clf()
+
+    if sum(masks_flat) < 0.1 or 1 - sum(masks_flat) < 0.1:
+        logger.debug('found uniform edge masks with delta 0.1')
+        logger.debug(f'masks_flat[:10]={masks_flat[:10]}')
+    else:
+        plt.hist(masks_flat, bins=50)
+        plt.savefig(figures_dir / f"{figures_id}_explanation_histogram.png")
+        plt.clf()
 
     return roc_auc
 

@@ -15,6 +15,7 @@ def uniform_debug_log(soft_edge_masks: torch.Tensor, check_parameters=None):
             grad_norm = p.grad.norm().item() if p.grad is not None else "None"
             logger.debug(f"{name} norm: {p.data.norm():.4f}, grad_norm: {grad_norm}")
 
+     
     logger.debug(
         f"mask [0] bincounts = {np.histogram(soft_edge_masks[0].cpu().detach(), bins=10)}"
     )
