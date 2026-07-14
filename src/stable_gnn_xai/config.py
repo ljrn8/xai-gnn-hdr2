@@ -51,7 +51,7 @@ EXPLAINERS = {
     "output": Path("output/explanations"), 
     "explainers": [
         {
-            'name': 'debugging',
+            'name': 'dev',
             'explainer': PGExplainer,
             'grid_search': {
                 'tau':                          [1],

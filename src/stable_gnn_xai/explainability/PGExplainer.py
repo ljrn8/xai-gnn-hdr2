@@ -329,11 +329,11 @@ class PGExplainer(GraphLevelExplainer):
 
     def _tile_graphs(self, graphs: Iterable[Data]):
         logger.info('Tiling graphs for Monte Carlo sampling')
-        tiled_graphs = [G for G in graphs for _ in range(self.reparameterization_samples)]
-        tiled = Batch.from_data_list(tiled_graphs)
-        tiled.to(DEVICE)
+        tile_list = [G for G in graphs for _ in range(self.reparameterization_samples)]
+        tiled_batch = Batch.from_data_list(tile_list)
+        tiled_batch.to(DEVICE)
         logger.info('done')
-        return tiled
+        return tiled_batch, tile_list
 
 
     def entropy_regularizer(self, soft_edge_masks):
@@ -352,7 +352,7 @@ class PGExplainer(GraphLevelExplainer):
         for _ in range(self.proxy_M):
             self.proxy_optimizer.zero_grad()
             gen_loss = sum(
-                self.proxy_generator.forward(G, mask)[1]
+                self.proxy_generator.forward(G, mask.view(-1))[1]
                 for G, mask in zip(graphs, edge_masks)
             )
             gen_loss.backward()
@@ -371,32 +371,46 @@ class PGExplainer(GraphLevelExplainer):
             self,
             model, 
             logit_edge_masks,
-            tiled_graphs_batch: Batch, 
+            tile_list, 
             hard_mask_sampler=_GS_sample,
     ):
         """Parrallel Monte Carlo Binary Concrete Distribution estimation for 
         subgraph predictions using a logit (attribution) edge mask, optionally generating proxy graphs on each sample"""
         
+        tiled_graphs_batch = Batch.from_data_list(tile_list)
+        n_graphs = len(logit_edge_masks)
+
         # for each graph, sample noise and compute hard masks
         hard_edge_weights = []
+        per_graph_hard = []
         for logits in logit_edge_masks:
             hard = hard_mask_sampler(logits, self.reparameterization_samples)  
             hard_edge_weights.append(hard.reshape(-1))  # (samples * n_edges,)
+            per_graph_hard.append(hard)
 
-        hard_edge_weights = torch.cat(hard_edge_weights)  # matches batched edge_index ordering
-        
+        # unroll into a list aligned with tile_list's ordering:
+        # [G0_s0, G0_s1, ..., G0_s{S-1}, G1_s0, ...] -- matches _tile_graphs
+        tiled_masks = [
+            per_graph_hard[i][s]                      # (n_edges_i,)
+            for i in range(n_graphs)
+            for s in range(self.reparameterization_samples)
+        ]
+
         if self.use_proxy_graphs:
-            self._proxy_generator_inner_optimization(tiled_graphs_batch, hard_edge_weights)
-            proxy_graphs = self._proxy_generator_build_proxy_graphs(tiled_graphs_batch, hard_edge_weights)
+            self._proxy_generator_inner_optimization(tile_list, tiled_masks)
+            proxy_graphs = self._proxy_generator_build_proxy_graphs(tile_list, tiled_masks)
+            proxy_batch = Batch.from_data_list(proxy_graphs).to(DEVICE)
 
             # TODO: match proxy_graphs list and tiled graphs batch (make it a bathc object aswell)
+            # variable sizes
             preds = model(
-                proxy_graphs.x, 
-                proxy_graphs.edge_index,
-                batch=tiled_graphs_batch.batch
+                proxy_batch.x, 
+                proxy_batch.edge_index,
+                batch=proxy_batch.batch
             )
 
         else:
+            hard_edge_weights = torch.cat(hard_edge_weights)
             preds = model(
                 tiled_graphs_batch.x, 
                 tiled_graphs_batch.edge_index,
@@ -405,7 +419,7 @@ class PGExplainer(GraphLevelExplainer):
             )
 
         scores = torch.sigmoid(preds)
-        return scores.view(len(logit_edge_masks), self.reparameterization_samples).mean(dim=1)  # (N,)
+        return scores.view(n_graphs, self.reparameterization_samples).mean(dim=1)  # (N,)
 
 
     def _proxy_batched_estimation(
@@ -462,10 +476,9 @@ class PGExplainer(GraphLevelExplainer):
             logger.info('Proxy graph generator has been enabled')
             self.proxy_generator = ProxyGraphGenerator(node_feature_dim=graphs[0].x.shape[1])
             self.proxy_optimizer = torch.optim.Adam(self.proxy_generator.parameters(), lr=self.proxy_lr)
-        else:
-            # tile each graph `samples` times
-            # proxy graphs have variable sizes and are handled differently
-            tiled = self._tile_graphs(graphs)
+        
+        # tile each graph `samples` times
+        tile_batch, tile_list = self._tile_graphs(graphs)
 
         model.eval()
         for p in model.parameters():
@@ -492,7 +505,7 @@ class PGExplainer(GraphLevelExplainer):
             # perturbed graph estimation (core entry point)
             explanatory_y_preds = self._batched_reparameterization_estimate(
                 model=model,
-                tiled_graphs_batch=tiled,
+                tile_list=tile_list,
                 logit_edge_masks=logit_edge_masks,
                 hard_mask_sampler=self.sampler
             )
