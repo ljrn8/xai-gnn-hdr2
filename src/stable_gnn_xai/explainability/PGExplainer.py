@@ -294,7 +294,8 @@ class PGExplainer(GraphLevelExplainer):
         self.explanation_module_class = {
             'default': PGEExplanationModule,
             'comprehensive': ComprehensiveMLPExplanationModule,
-            'contextual': ContextualGRUExplanationModule
+            'contextual': ContextualGRUExplanationModule,
+            'auto-regressive': AutoregressiveMaskExplanationModule
         }[explanation_module]
 
 
@@ -336,36 +337,36 @@ class PGExplainer(GraphLevelExplainer):
         return tiled_batch, tile_list
 
 
-    def entropy_regularizer(self, soft_edge_masks):
+    def _entropy_regularizer(self, soft_edge_masks):
         return self.entropy_regularization * torch.stack(
             [elementwise_entropy(m).mean() for m in soft_edge_masks]
         ).mean()
         
 
-    def mean_regularizer(self, soft_edge_masks):
+    def _mean_regularizer(self, soft_edge_masks):
         return self.mean_regularization * torch.stack(
             [m.mean() for m in soft_edge_masks]
         ).mean()
         
 
     def _proxy_generator_inner_optimization(self, graphs, edge_masks):
+        batch_data = Batch.from_data_list(graphs).to(DEVICE)
         for _ in range(self.proxy_M):
             self.proxy_optimizer.zero_grad()
-            gen_loss = sum(
-                self.proxy_generator.forward(G, mask.view(-1))[1]
-                for G, mask in zip(graphs, edge_masks)
-            )
+            _, gen_loss = self.proxy_generator.forward_batched(batch_data, edge_masks)
             gen_loss.backward()
             self.proxy_optimizer.step()
 
-    def _proxy_generator_build_proxy_graphs(self, graphs, edge_masks):
-        proxy_graphs = []
-        for G, mask in zip(graphs, edge_masks):
-            A_tilde, _ = self.proxy_generator(G, mask.detach())
-            proxy_graphs.append(self.proxy_generator.build_proxy_data(G, A_tilde, mask.detach()))
 
+    def _proxy_generator_build_proxy_graphs(self, graphs, edge_masks):
+        batch_data = Batch.from_data_list(graphs).to(DEVICE)
+        A_tildes, _ = self.proxy_generator.forward_batched(batch_data, edge_masks)
+        proxy_graphs = [
+            self.proxy_generator.build_proxy_data(G, A_tilde)
+            for G, A_tilde in zip(graphs, A_tildes)
+        ]
         return proxy_graphs
-    
+
 
     def _batched_reparameterization_estimate(
             self,
@@ -397,12 +398,15 @@ class PGExplainer(GraphLevelExplainer):
         ]
 
         if self.use_proxy_graphs:
-            self._proxy_generator_inner_optimization(tile_list, tiled_masks)
+            
+            # detach masks during optimzaition (gradient stops at the GAE's)
+            self._proxy_generator_inner_optimization(
+                tile_list, [m.detach() for m in tiled_masks]
+            ) 
+
+            # keep masks attached to gradient when building proxy graphs (graident needs to flow through)
             proxy_graphs = self._proxy_generator_build_proxy_graphs(tile_list, tiled_masks)
             proxy_batch = Batch.from_data_list(proxy_graphs).to(DEVICE)
-
-            # TODO: match proxy_graphs list and tiled graphs batch (make it a bathc object aswell)
-            # variable sizes
             preds = model(
                 proxy_batch.x, 
                 proxy_batch.edge_index,
@@ -500,7 +504,6 @@ class PGExplainer(GraphLevelExplainer):
             for m, g in zip(logit_edge_masks, graphs):
                 assert m.shape[0] == g.edge_index.shape[1], f"mask shape {m.shape} does not match graph edge count {g.edge_index.shape}"
 
-            soft_edge_masks = [torch.sigmoid(m) for m in logit_edge_masks]
 
             # perturbed graph estimation (core entry point)
             explanatory_y_preds = self._batched_reparameterization_estimate(
@@ -510,9 +513,16 @@ class PGExplainer(GraphLevelExplainer):
                 hard_mask_sampler=self.sampler
             )
 
+            if self.sampler_method == 'IGR':
+                # mu only
+                soft_edge_masks = [torch.sigmoid(l[:, 0]) for l in logit_edge_masks]
+            else:
+                soft_edge_masks = [torch.sigmoid(m) for m in logit_edge_masks]
+
+
             # regularization
-            entropy_reg = self.entropy_regularizer(soft_edge_masks)
-            mean_reg = self.mean_regularizer(soft_edge_masks)
+            entropy_reg = self._entropy_regularizer(soft_edge_masks)
+            mean_reg = self._mean_regularizer(soft_edge_masks)
 
             loss = self.loss_f(explanatory_y_preds, y_preds)
 
@@ -527,7 +537,8 @@ class PGExplainer(GraphLevelExplainer):
             loss += mean_reg + entropy_reg
             loss.backward()
             optimizer.step()
-            
+
+
         if sum(soft_edge_masks[0]) < 0.1 or 1 - sum(soft_edge_masks[0]) < 0.1:
             logger.debug('found uniform edge masks with delta 0.1')
         else:

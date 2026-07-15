@@ -58,10 +58,12 @@ EXPLAINERS = {
                 'reparameterization_samples':   [50],
                 'lr':                           [0.01],
                 'hidden_size':                  [64],
-                'epochs':                       [100],
+                'epochs':                       [30],
                 'entropy_regularization':       [0.05],
                 'mean_regularization':          [0.1],
-                "use_proxy_graphs":             [True],
+                "use_proxy_graphs":             [False],
+                'explanation_module':           ['default'],
+                'sampler_method':               ['IGR']
             },
         }
     ]

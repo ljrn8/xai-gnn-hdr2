@@ -13,6 +13,8 @@ from torch import Tensor
 from torch_geometric.data import Data
 from torch_geometric.nn import GCNConv
 from loguru import logger
+from torch_geometric.utils import unbatch, unbatch_edge_index
+from torch_geometric.data import Batch
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -63,42 +65,54 @@ class ProxyGraphGenerator(nn.Module):
         self.vgae_enc_logvar = _GCNEncoder(node_feature_dim, latent_dim)
 
 
-    def forward(self, G: Data, soft_mask: Tensor):
-        n = G.x.shape[0]
-        x = G.x.float()
-        edge_index = G.edge_index
+    def forward_batched(self, batch_data: Batch, edge_masks: list[Tensor]):
+        """Encodes ALL graphs in one parallel GCN pass (this is the expensive part,
+        now done once instead of per-graph), then decodes + computes loss per graph
+        (cheap matmuls, not model forward calls)."""
 
-        exp_weight = soft_mask.view(-1)          # A' — continuous, no threshold
-        delta_weight = 1.0 - exp_weight          # A∆ = A - A'  (eq. matches paper exactly)
+        x = batch_data.x.float()
+        edge_index = batch_data.edge_index
 
-        # GAE on full graph, weighted by A' (eq. 13-14)
-        z_exp = self.gae_enc(x, edge_index, edge_weight=exp_weight)
-        A_tilde_exp = _decode(z_exp)
+        exp_weight = torch.cat([m.view(-1) for m in edge_masks]).to(x.device)
+        delta_weight = 1.0 - exp_weight
 
-        # VGAE on full graph, weighted by A∆ (eq. 14-15)
-        mu = self.vgae_enc_mu(x, edge_index, edge_weight=delta_weight)
-        logvar = self.vgae_enc_logvar(x, edge_index, edge_weight=delta_weight)
-        z_delta = mu + torch.exp(0.5 * logvar) * torch.randn_like(mu)
-        A_tilde_delta = _decode(z_delta)
+        # one parallel encode pass across the whole batch -- was previously
+        # n_graphs * proxy_M sequential calls, now 3 total calls regardless of n_graphs
+        z_exp_all = self.gae_enc(x, edge_index, edge_weight=exp_weight)
+        mu_all = self.vgae_enc_mu(x, edge_index, edge_weight=delta_weight)
+        logvar_all = self.vgae_enc_logvar(x, edge_index, edge_weight=delta_weight)
+        z_delta_all = mu_all + torch.exp(0.5 * logvar_all) * torch.randn_like(mu_all)
 
-        A_tilde = (A_tilde_exp + A_tilde_delta).clamp(0, 1)   # eq. 16
-        ...  # L_in / L_kl unchanged — A_orig target stays binary ground truth
+        # split back to per-graph node sets -- indexing only, no compute
+        z_exp_list = unbatch(z_exp_all, batch_data.batch)
+        z_delta_list = unbatch(z_delta_all, batch_data.batch)
+        mu_list = unbatch(mu_all, batch_data.batch)
+        logvar_list = unbatch(logvar_all, batch_data.batch)
+        edge_index_list = unbatch_edge_index(edge_index, batch_data.batch)  # node idx reset to 0..n_i-1
 
-        # L_in (eq. 11) — weighted BCE against original adjacency
-        A_orig = _adj(edge_index, n)
+        A_tildes = []
+        total_loss = 0.0
         eps = 1e-8
-        pos = self.beta * (A_orig * torch.log(A_tilde + eps)).sum() / (A_orig.sum() + eps)
-        neg = ((1 - A_orig) * torch.log(1 - A_tilde + eps)).sum() / ((1 - A_orig).sum() + eps)
-        L_in = -(pos + neg)
+        for z_exp, z_delta, mu, logvar, ei in zip(
+            z_exp_list, z_delta_list, mu_list, logvar_list, edge_index_list
+        ):
+            n = z_exp.shape[0]
+            A_tilde_exp = _decode(z_exp)
+            A_tilde_delta = _decode(z_delta)
+            A_tilde = (A_tilde_exp + A_tilde_delta).clamp(0, 1)
+            A_tildes.append(A_tilde)
 
-        # L_KL against N(0, I) prior
-        L_kl = -0.5 * (1 + logvar - mu.pow(2) - logvar.exp()).mean()
+            A_orig = _adj(ei, n)
+            pos = self.beta * (A_orig * torch.log(A_tilde + eps)).sum() / (A_orig.sum() + eps)
+            neg = ((1 - A_orig) * torch.log(1 - A_tilde + eps)).sum() / ((1 - A_orig).sum() + eps)
+            L_in = -(pos + neg)
+            L_kl = -0.5 * (1 + logvar - mu.pow(2) - logvar.exp()).mean()
+            total_loss = total_loss + L_in + self.lam * L_kl
 
-        return A_tilde, L_in + self.lam * L_kl
+        return A_tildes, total_loss
+    
 
-
-    def build_proxy_data(self, G: Data, A_tilde: Tensor, soft_mask: Tensor,
-                         threshold: float = 0.5) -> Data:
+    def build_proxy_data(self, G: Data, A_tilde: Tensor) -> Data:
         """Threshold A_tilde into a Data object, always keeping G_exp edges."""
 
         # threshold proxy, zero out exp region to avoid double-counting
