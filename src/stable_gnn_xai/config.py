@@ -15,14 +15,14 @@ SEED = 0
 FIGURES = Path("output/figures")
 
 DATASETS = {
-    "output": Path("Data"), 
+    "output": Path("/Data"), 
     "test_split": 0.2, 
     "validation_split": 0.2
 }
 
 MODELS = {
     "output": Path("output/runs"),
-    "iterations": 10,
+    "iterations": 5,
     "models":  [
         {
             "name": "GCN",
@@ -51,20 +51,38 @@ EXPLAINERS = {
     "output": Path("output/explanations"), 
     "explainers": [
         {
-            'name': 'dev',
+            'name': 'explainer_module',
             'explainer': PGExplainer,
             'grid_search': {
-                'tau':                          [1],
-                'reparameterization_samples':   [50],
-                'lr':                           [0.01],
-                'hidden_size':                  [64],
-                'epochs':                       [30],
-                'entropy_regularization':       [0.05],
-                'mean_regularization':          [0.1],
-                "use_proxy_graphs":             [False],
-                'explanation_module':           ['default'],
-                'sampler_method':               ['IGR']
+                'epochs':                       [1],
+                'explanation_module':           ['default', 'comprehensive', 'contextual', 'auto-regressive'],
             },
-        }
+        },
+        {
+            'name': 'sampler',
+            'explainer': PGExplainer,
+            'grid_search': {
+                'epochs':                       [1],
+                'sampler_method':               ['GS', 'IGR'],
+            },
+        },
+        {
+            'name': 'proxy_graphs',
+            'explainer': PGExplainer,
+            'grid_search': {
+                'epochs':                       [1],
+                'proxy_mode':                    [True],
+            },
+        },
+
+        {
+            'name': 'seed_ensembling_test',
+            'explainer': PGExplainer,
+            'grid_search': {
+                'epochs':                       [1, 1, 1, 1],
+            },
+        },
+
+        # TODO: GNNExplainer, Random Explainer other baselines
     ]
 }

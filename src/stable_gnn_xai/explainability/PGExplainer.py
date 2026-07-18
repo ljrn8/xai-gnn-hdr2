@@ -34,9 +34,9 @@ def get_model_embeddings_batched(model: GNN, graphs: Batch):
 
 
 class _CachedCausalLayer(nn.Module):
-    """One causal self-attention block with KV-caching: computes q/k/v for the
-    new token only, appends k/v to the running cache, attends the new query
-    over the full cache (all positions <= current step)."""
+    """One causal self-attention block with a preallocated KV-cache, batched
+    across graphs. Writes into a fixed (n_graphs, n_heads, max_edges, head_dim)
+    buffer via index-assignment instead of growing it with torch.cat every step."""
 
     def __init__(self, d_model, n_heads):
         super().__init__()
@@ -55,25 +55,35 @@ class _CachedCausalLayer(nn.Module):
             nn.Linear(d_model, d_model * 4), nn.ReLU(), nn.Linear(d_model * 4, d_model)
         )
 
-    def step(self, x_new: Tensor, cache: dict):
-        # x_new: (1, 1, d_model) -- this step's single new token, pre-norm input
+    def init_cache(self, batch_size, max_len, device, dtype):
+        return {
+            "k": torch.zeros(batch_size, self.n_heads, max_len, self.head_dim, device=device, dtype=dtype),
+            "v": torch.zeros(batch_size, self.n_heads, max_len, self.head_dim, device=device, dtype=dtype),
+        }
+
+    def step(self, x_new: Tensor, cache: dict, t: int):
+        B = x_new.shape[0]
         residual = x_new
         h = self.norm1(x_new)
 
-        q = self.q_proj(h).view(1, 1, self.n_heads, self.head_dim).transpose(1, 2)
-        k_new = self.k_proj(h).view(1, 1, self.n_heads, self.head_dim).transpose(1, 2)
-        v_new = self.v_proj(h).view(1, 1, self.n_heads, self.head_dim).transpose(1, 2)
+        q = self.q_proj(h).view(B, 1, self.n_heads, self.head_dim).transpose(1, 2)
+        k_new = self.k_proj(h).view(B, 1, self.n_heads, self.head_dim).transpose(1, 2)
+        v_new = self.v_proj(h).view(B, 1, self.n_heads, self.head_dim).transpose(1, 2)
 
-        if cache["k"] is None:
-            k, v = k_new, v_new
-        else:
-            k = torch.cat([cache["k"], k_new], dim=2)
-            v = torch.cat([cache["v"], v_new], dim=2)
-        cache["k"], cache["v"] = k, v
+        # buffer write stays O(1) in-place — fine, since nothing tracked by
+        # autograd ever holds a live view into this storage (see clone below)
+        cache["k"][:, :, t:t + 1, :] = k_new
+        cache["v"][:, :, t:t + 1, :] = v_new
 
-        attn_scores = (q @ k.transpose(-2, -1)) / (self.head_dim ** 0.5)  # (1, heads, 1, t)
+        # clone out of the buffer *now*, so this step's matmul operands are
+        # immune to the in-place writes future steps make into `cache`.
+        # gradients still flow (clone is differentiable), unlike detach.
+        k = cache["k"][:, :, : t + 1, :].clone()
+        v = cache["v"][:, :, : t + 1, :].clone()
+
+        attn_scores = (q @ k.transpose(-2, -1)) / (self.head_dim ** 0.5)
         attn_weights = torch.softmax(attn_scores, dim=-1)
-        attn_out = (attn_weights @ v).transpose(1, 2).reshape(1, 1, -1)
+        attn_out = (attn_weights @ v).transpose(1, 2).reshape(B, 1, -1)
         attn_out = self.out_proj(attn_out)
 
         x = residual + attn_out
@@ -83,27 +93,30 @@ class _CachedCausalLayer(nn.Module):
 
 class AutoregressiveMaskExplanationModule(CustomExplainerModule):
     """Autoregressively generates a soft edge mask with causal, KV-cached
-    self-attention. Edge order is a random permutation fixed by `seed`
-    (offset per-graph), for downstream seed-ensembling to cancel order bias.
+    self-attention, batched across graphs (not just within a graph). Edge
+    order is a random permutation fixed by `seed` (offset per
+    graph), for
+    downstream seed-ensembling to cancel order bias.
 
-    Step i's input is [edge_i_embedding, m_{i-1}], where m_{i-1} is the REAL
-    sigmoid mask value produced at step i-1 (m_0 = 0 baseline) -- carried
-    forward explicitly as a scalar, separate from the KV-cache, which only
-    ever stores k/v (valid to cache since causal masking guarantees they never
-    change once computed).
+    Step i's input is [edge_i_embedding, m_{i-1}] per graph, where m_{i-1} is
+    the REAL sigmoid mask value produced at step i-1 (m_0 = 0 baseline).
+    Graphs with fewer edges than max_edges are zero-padded and simply have
+    their trailing steps discarded before returning -- they still burn compute
+    on padded steps, but the whole batch shares one Python/kernel-launch loop
+    of length max_edges instead of n_graphs independent loops of length n_edges_i.
     """
 
-    def __init__(self, 
-                 hidden_size, 
+    def __init__(self,
+                 hidden_size,
                  embedding_size,
                  output_size,
-                 seed: int = 0, 
-                 n_heads: int = 4, 
+                 seed: int = 0,
+                 n_heads: int = 4,
                  n_layers: int = 2,
-                  **kwargs
+                 **kwargs
     ):
         super().__init__(hidden_size, embedding_size, output_size)
-        
+
         self.seed = seed
         self.n_layers = n_layers
         self.input_proj = nn.Linear(embedding_size * 2 + 1, hidden_size)
@@ -112,42 +125,69 @@ class AutoregressiveMaskExplanationModule(CustomExplainerModule):
         )
         self.output_head = nn.Linear(hidden_size, output_size)
 
+        # permutations are a deterministic function of (seed, graph_idx, n_edges) and
+        # don't depend on model params -- compute once, not on every forward/epoch.
+        # NOTE: assumes `graphs` is passed in the same order/identity across calls
+        # (true for the epoch loop in explain_graph_task). If that assumption breaks,
+        # key on id(G) instead of graph_idx, or clear self._perm_cache manually.
+        self._perm_cache = {}
+
+    def _get_perm(self, graph_idx, n_edges, device):
+        key = (graph_idx, n_edges)
+        if key not in self._perm_cache:
+            gen = torch.Generator(device="cpu").manual_seed(self.seed + graph_idx)
+            perm = torch.randperm(n_edges, generator=gen)
+            self._perm_cache[key] = perm.to(device)
+        return self._perm_cache[key]
+
     def forward(self, model, graphs):
         batch_obj = Batch.from_data_list(graphs).to(DEVICE)
-        logits, embeddings_list = get_model_embeddings_batched(
-            model, batch_obj
-        )
+        logits, embeddings_list = get_model_embeddings_batched(model, batch_obj)
         final_embeddings = [e[-1] for e in embeddings_list]
-        all_logits = []
 
+        n_graphs = len(graphs)
+        device = final_embeddings[0].device
+        dtype = final_embeddings[0].dtype
+
+        shuffled_list, inv_perms, edge_counts = [], [], []
         for graph_idx, (G, fe) in enumerate(zip(graphs, final_embeddings)):
             src, dst = G.edge_index
             edge_embeddings = torch.cat([fe[src], fe[dst]], dim=-1)
             n_edges = edge_embeddings.shape[0]
-            device = edge_embeddings.device
+            edge_counts.append(n_edges)
 
-            gen = torch.Generator(device="cpu").manual_seed(self.seed + graph_idx)
-            perm = torch.randperm(n_edges, generator=gen).to(device)
-            inv_perm = torch.argsort(perm)
-            shuffled_embeddings = edge_embeddings[perm]
+            perm = self._get_perm(graph_idx, n_edges, device)
+            inv_perms.append(torch.argsort(perm))
+            shuffled_list.append(edge_embeddings[perm])
 
-            caches = [{"k": None, "v": None} for _ in range(self.n_layers)]
-            logits_list = []
-            m_prev = torch.zeros(1, device=device)  # m_0, baseline
+        max_edges = max(edge_counts)
+        edge_dim = shuffled_list[0].shape[-1]
 
-            for i in range(n_edges):
-                x_in = torch.cat([shuffled_embeddings[i], m_prev], dim=-1)
-                x = self.input_proj(x_in).view(1, 1, -1)
+        # (n_graphs, max_edges, 2*embedding_size), zero-padded past each graph's n_edges
+        padded = torch.zeros(n_graphs, max_edges, edge_dim, device=device, dtype=dtype)
+        for i, s in enumerate(shuffled_list):
+            padded[i, : s.shape[0]] = s
 
-                for layer_idx, layer in enumerate(self.layers):
-                    x, caches[layer_idx] = layer.step(x, caches[layer_idx])
+        caches = [layer.init_cache(n_graphs, max_edges, device, dtype) for layer in self.layers]
+        m_prev = torch.zeros(n_graphs, 1, device=device, dtype=dtype)
+        all_step_logits = torch.zeros(n_graphs, max_edges, self.output_size, device=device, dtype=dtype)
 
-                logit_i = self.output_head(x.view(-1))       # o_i
-                logits_list.append(logit_i)
-                m_prev = torch.sigmoid(logit_i).mean().view(1)  # m_i, fed to step i+1
+        for i in range(max_edges):
+            x_in = torch.cat([padded[:, i, :], m_prev], dim=-1)   # (n_graphs, 2E+1)
+            x = self.input_proj(x_in).unsqueeze(1)                # (n_graphs, 1, hidden)
 
-            logits = torch.stack(logits_list, dim=0)[inv_perm]  # back to edge_index order
-            all_logits.append(logits)
+            for layer_idx, layer in enumerate(self.layers):
+                x, caches[layer_idx] = layer.step(x, caches[layer_idx], t=i)
+
+            logit_i = self.output_head(x.squeeze(1))              # (n_graphs, output_size)
+            all_step_logits[:, i, :] = logit_i
+            m_prev = torch.sigmoid(logit_i).mean(dim=-1, keepdim=True)  # (n_graphs, 1)
+
+        all_logits = []
+        for i in range(n_graphs):
+            n_edges = edge_counts[i]
+            logits_i = all_step_logits[i, :n_edges]     # drop padded steps
+            all_logits.append(logits_i[inv_perms[i]])   # back to edge_index order
 
         return all_logits
 
@@ -257,13 +297,13 @@ class PGExplainer(GraphLevelExplainer):
 
     def __init__(
         self,
-        hidden_size,
-        epochs,
-        lr,
-        mean_regularization,
-        entropy_regularization,
-        tau,
-        reparameterization_samples,
+        hidden_size=64,
+        epochs=50,
+        lr=0.01,
+        mean_regularization=0.05,
+        entropy_regularization=0.1,
+        tau=1.0,
+        reparameterization_samples=30,
         use_proxy_graphs: bool = False,
         proxy_lr: float = 0.01,
         proxy_M: int = 1,

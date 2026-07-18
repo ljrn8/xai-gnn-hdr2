@@ -9,13 +9,13 @@ src/stable_gnn_xai/datasets/mutag.py
 src/stable_gnn_xai/datasets/ogx.py
 src/stable_gnn_xai/datasets/synthetic_motifs.py
 src/stable_gnn_xai/datasets/util.py
+src/stable_gnn_xai/explainability/GNNExplainer.py
+src/stable_gnn_xai/explainability/PGExplainer.py
+src/stable_gnn_xai/explainability/RandomExplainer.py
 src/stable_gnn_xai/explainability/__init__.py
 src/stable_gnn_xai/explainability/explain.py
+src/stable_gnn_xai/explainability/proxy_generation.py
 src/stable_gnn_xai/explainability/utils.py
-src/stable_gnn_xai/explainability/explainers/GNNExplainer.py
-src/stable_gnn_xai/explainability/explainers/PGExplainers.py
-src/stable_gnn_xai/explainability/explainers/RandomExplainer.py
-src/stable_gnn_xai/explainability/explainers/__init__.py
 src/stable_gnn_xai/training/__init__.py
 src/stable_gnn_xai/training/models.py
 src/stable_gnn_xai/training/train.py

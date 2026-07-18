@@ -58,11 +58,11 @@ class ProxyGraphGenerator(nn.Module):
         self.beta = beta
 
         # GAE branch for G_exp (eq. 13)
-        self.gae_enc = _GCNEncoder(node_feature_dim, latent_dim)
+        self.gae_enc = _GCNEncoder(node_feature_dim, latent_dim).to(DEVICE)
 
         # VGAE branch for G_delta = G - G_exp (eq. 14)
-        self.vgae_enc_mu = _GCNEncoder(node_feature_dim, latent_dim)
-        self.vgae_enc_logvar = _GCNEncoder(node_feature_dim, latent_dim)
+        self.vgae_enc_mu = _GCNEncoder(node_feature_dim, latent_dim).to(DEVICE)
+        self.vgae_enc_logvar = _GCNEncoder(node_feature_dim, latent_dim).to(DEVICE)
 
 
     def forward_batched(self, batch_data: Batch, edge_masks: list[Tensor]):
@@ -70,10 +70,11 @@ class ProxyGraphGenerator(nn.Module):
         now done once instead of per-graph), then decodes + computes loss per graph
         (cheap matmuls, not model forward calls)."""
 
+        batch_data = batch_data.to(DEVICE)
         x = batch_data.x.float()
-        edge_index = batch_data.edge_index
+        edge_index = batch_data.edge_index.to()
 
-        exp_weight = torch.cat([m.view(-1) for m in edge_masks]).to(x.device)
+        exp_weight = torch.cat([m.view(-1) for m in edge_masks]).to(DEVICE)
         delta_weight = 1.0 - exp_weight
 
         # one parallel encode pass across the whole batch -- was previously
