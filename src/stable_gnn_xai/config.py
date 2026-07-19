@@ -1,4 +1,4 @@
-"""Run and experiment configurations"""
+"""Run and experimental configurations"""
 
 from .training.models import WeightedNodeGCN, WeightedNodeGIN
 from .explainability.PGExplainer import PGExplainer
@@ -47,42 +47,58 @@ MODELS = {
     ]
 }
 
+# default epochs
+epcs = 100
+
 EXPLAINERS = {
     "output": Path("output/explanations"), 
     "explainers": [
         {
+            'name': 'GNNE',
+            'explainer': GNNExplainer,
+            'grid_search': {
+                'epochs': [epcs]
+            }
+        },
+        {
+            'name': 'Random',
+            'explainer': RandomExplainer,
+            'grid_search': {
+                'seed': [0] 
+            }
+        },
+        {
             'name': 'explainer_module',
             'explainer': PGExplainer,
             'grid_search': {
-                'epochs':                       [1],
-                'explanation_module':           ['default', 'comprehensive', 'contextual', 'auto-regressive'],
+                'epochs':               [epcs],
+                'explanation_module':   ['default', 'comprehensive', 
+                                        'contextual', 'auto-regressive'],
             },
         },
         {
-            'name': 'sampler',
+            'name': 'sampler_method',
             'explainer': PGExplainer,
             'grid_search': {
-                'epochs':                       [1],
-                'sampler_method':               ['GS', 'IGR'],
+                'epochs':               [epcs],
+                'sampler_method':   ['GS', 'IGR'],
             },
         },
         {
             'name': 'proxy_graphs',
             'explainer': PGExplainer,
             'grid_search': {
-                'epochs':                       [1],
-                'proxy_mode':                    [True],
-            },
+                'use_proxy_graphs': [True],
+                'epochs': [epcs],
+                'proxy_M': [1, 2, 5],
+            }
         },
-
         {
-            'name': 'seed_ensembling_test',
+            'name': 'seed_ensembling',
             'explainer': PGExplainer,
             'grid_search': {
-                'epochs':                       [1, 1, 1, 1],
-            },
-        },
-
-        # TODO: GNNExplainer, Random Explainer other baselines
+                'epochs': [epcs, epcs, epcs, epcs]
+            }
+        }
     ]
 }
