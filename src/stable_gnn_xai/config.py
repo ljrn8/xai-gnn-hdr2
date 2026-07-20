@@ -97,8 +97,18 @@ EXPLAINERS = {
             'name': 'seed_ensembling',
             'explainer': PGExplainer,
             'grid_search': {
-                'epochs': [epcs, epcs, epcs, epcs]
+                'epochs': [epcs, epcs, epcs, epcs, epcs]
             }
-        }
+        },
+        {
+            'name': 'auto_regessive_seed_ensembling',
+            'explainer': PGExplainer,
+            'grid_search': {
+                'epochs':               [epcs, epcs, epcs, epcs, epcs],
+                'explanation_module':   ['auto-regressive'],
+            },
+        },
     ]
 }
+
+

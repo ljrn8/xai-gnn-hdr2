@@ -10,6 +10,7 @@ from loguru import logger
 from torch_geometric.data import Batch
 from abc import ABC, abstractmethod
 from .proxy_generation import ProxyGraphGenerator
+import random
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -110,7 +111,7 @@ class AutoregressiveMaskExplanationModule(CustomExplainerModule):
                  hidden_size,
                  embedding_size,
                  output_size,
-                 seed: int = 0,
+                 seed: int = random.randint(0, 2**32 - 1),
                  n_heads: int = 4,
                  n_layers: int = 2,
                  **kwargs
