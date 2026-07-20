@@ -48,18 +48,11 @@ MODELS = {
 }
 
 # default epochs
-epcs = 100
+epcs = 1
 
 EXPLAINERS = {
     "output": Path("output/explanations"), 
     "explainers": [
-        {
-            'name': 'GNNE',
-            'explainer': GNNExplainer,
-            'grid_search': {
-                'epochs': [epcs]
-            }
-        },
         {
             'name': 'Random',
             'explainer': RandomExplainer,
@@ -67,6 +60,14 @@ EXPLAINERS = {
                 'seed': [0] 
             }
         },
+        {
+            'name': 'GNNE',
+            'explainer': GNNExplainer,
+            'grid_search': {
+                'epochs': [epcs]
+            }
+        },
+        
         {
             'name': 'explainer_module',
             'explainer': PGExplainer,
