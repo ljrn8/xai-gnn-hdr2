@@ -1,4 +1,4 @@
-output
+# output (now tracked with LFS)
 env
 .env
 .ev
