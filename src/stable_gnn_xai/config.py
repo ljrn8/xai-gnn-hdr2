@@ -48,7 +48,7 @@ MODELS = {
 }
 
 # default epochs
-epcs = 1
+epcs = 50
 
 EXPLAINERS = {
     "output": Path("output/explanations"), 
@@ -91,7 +91,7 @@ EXPLAINERS = {
             'grid_search': {
                 'use_proxy_graphs': [True],
                 'epochs': [epcs],
-                'proxy_M': [1, 2, 5],
+                'proxy_M': [1],
             }
         },
         {

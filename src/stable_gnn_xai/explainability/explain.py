@@ -13,6 +13,16 @@ from typing_extensions import Iterable
 import matplotlib.pyplot as plt
 import copy
 
+# dev only (del)
+EXCLUDE = [
+    ('ba2_graphs', 'GIN'),
+    ('fluoride_carbonyl_graphs', 'GIN'),
+    ('tc_graphs', 'GIN'),
+    ('mutag', 'GIN'),
+    ('benzene_graphs', 'GIN'),
+    ('benzene_graphs', 'GCN'),
+]
+
 def get_timestamp():
     from datetime import datetime
     return datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -105,7 +115,7 @@ def run_explainers_from_config(
             ts = get_timestamp()
             ds_name = Path(model_run.dataset_root).stem
             model_name = model_run.model_name
-            id = f'{explainer_name}_{ts}'
+            id = f'{name}_{explainer_name}_{ts}'
             meta = copy.deepcopy(params)
             meta['penalty'] = penalty
             meta['id'] = id
@@ -211,7 +221,19 @@ def main(args):
 
             for model_run_file in run_names:
                 model_run = openpkl(root / model_name / model_run_file)
-                dataset_name = Path(model_run_file).stem
+                dataset_name = Path(model_run_file).stem  
+
+                if dataset_name == 'reddit_binary_graphs':
+                    logger.info(f"skipping {dataset_name} as it is too large (OOM on auto-regression for available recources) ")
+                    continue
+
+                if model_run.test_evaluation.metrics['f1'] < args.min_f1:
+                    logger.info(f'model run has low test performance (< {args.min_f1}), skipping explanation')
+                    continue
+
+                if any(ds == dataset_name and m == model_name for (ds, m) in EXCLUDE):
+                    logger.info(f"skipping {dataset_name} for model {model_name} as it is excluded from explanation")
+                    continue
 
                 logger.info(f"\n --> explaining model [{model_name}] for dataset [{dataset_name}]\n")
                 run_explainers_from_config(
@@ -238,5 +260,19 @@ if __name__ == "__main__":
         '-ex', 
         '--explainer', 
         help='only apply a single explainer (names defined under config.py)'
+    )
+    parser.add_argument(
+        '-f1', 
+        '--min-f1', 
+        help='minimum f1 score of a model run required for it to be explained',
+        default=0.75,
+        type=float
+    )
+    parser.add_argument(
+        '-o', 
+        '--overwrite', 
+        help='overwrite explanation with the exact same id',
+        default=0.75,
+        type=float
     )
     main(parser.parse_args())

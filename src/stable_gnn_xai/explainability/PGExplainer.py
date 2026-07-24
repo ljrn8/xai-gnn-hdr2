@@ -11,6 +11,9 @@ from torch_geometric.data import Batch
 from abc import ABC, abstractmethod
 from .proxy_generation import ProxyGraphGenerator
 import random
+from collections import defaultdict
+from pprint import pprint
+import gc
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -105,92 +108,115 @@ class AutoregressiveMaskExplanationModule(CustomExplainerModule):
     their trailing steps discarded before returning -- they still burn compute
     on padded steps, but the whole batch shares one Python/kernel-launch loop
     of length max_edges instead of n_graphs independent loops of length n_edges_i.
+
+    If max_edges for a graph_batch exceeds `max_edges_per_segment`, the edge
+    dimension is further split into segments, each with its own freshly
+    initialized KV cache. This bounds peak cache memory to
+    max_edges_per_segment regardless of how large max_edges gets, at the
+    cost of causal attention only seeing within-segment history (no
+    cross-segment context).
     """
 
     def __init__(self,
                  hidden_size,
                  embedding_size,
                  output_size,
-                 seed: int = random.randint(0, 2**32 - 1),
                  n_heads: int = 4,
                  n_layers: int = 2,
+                 graph_batch_size: int = 1_000,
+                 max_edges_per_segment: int = 200,
                  **kwargs
     ):
         super().__init__(hidden_size, embedding_size, output_size)
-
-        self.seed = seed
         self.n_layers = n_layers
         self.input_proj = nn.Linear(embedding_size * 2 + 1, hidden_size)
         self.layers = nn.ModuleList(
             [_CachedCausalLayer(hidden_size, n_heads) for _ in range(n_layers)]
         )
         self.output_head = nn.Linear(hidden_size, output_size)
+        self.graph_batch_size = graph_batch_size
+        self.max_edges_per_segment = max_edges_per_segment
 
-        # permutations are a deterministic function of (seed, graph_idx, n_edges) and
-        # don't depend on model params -- compute once, not on every forward/epoch.
-        # NOTE: assumes `graphs` is passed in the same order/identity across calls
-        # (true for the epoch loop in explain_graph_task). If that assumption breaks,
-        # key on id(G) instead of graph_idx, or clear self._perm_cache manually.
-        self._perm_cache = {}
+    def _run_autoregressive(self, padded, device, dtype):
+        """Runs the step loop over `padded` edges, segmenting along the edge
+        dimension whenever max_edges exceeds self.max_edges_per_segment.
+        Cache is reset at each segment boundary -> bounds peak memory to
+        max_edges_per_segment, at the cost of losing causal context across
+        segment boundaries.
+        """
+        n_graphs, max_edges, edge_dim = padded.shape
+        all_step_logits = torch.zeros(n_graphs, max_edges, self.output_size, device=device, dtype=dtype)
+        m_prev = torch.zeros(n_graphs, 1, device=device, dtype=dtype)
 
-    def _get_perm(self, graph_idx, n_edges, device):
-        key = (graph_idx, n_edges)
-        if key not in self._perm_cache:
-            gen = torch.Generator(device="cpu").manual_seed(self.seed + graph_idx)
-            perm = torch.randperm(n_edges, generator=gen)
-            self._perm_cache[key] = perm.to(device)
-        return self._perm_cache[key]
+        seg_len = self.max_edges_per_segment
+        for seg_start in range(0, max_edges, seg_len):
+            seg_end = min(seg_start + seg_len, max_edges)
+            this_seg_len = seg_end - seg_start
+
+            # fresh cache per segment -> bounded memory
+            caches = [layer.init_cache(n_graphs, this_seg_len, device, dtype) for layer in self.layers]
+
+            for i in range(this_seg_len):
+                global_i = seg_start + i
+                x_in = torch.cat([padded[:, global_i, :], m_prev], dim=-1)
+                x = self.input_proj(x_in).unsqueeze(1)
+
+                for layer_idx, layer in enumerate(self.layers):
+                    x, caches[layer_idx] = layer.step(x, caches[layer_idx], t=i)  # t local to segment
+
+                logit_i = self.output_head(x.squeeze(1))
+                all_step_logits[:, global_i, :] = logit_i
+                m_prev = torch.sigmoid(logit_i).mean(dim=-1, keepdim=True)
+
+            del caches
+            torch.cuda.empty_cache()
+            gc.collect()
+
+        return all_step_logits
 
     def forward(self, model, graphs):
-        batch_obj = Batch.from_data_list(graphs).to(DEVICE)
-        logits, embeddings_list = get_model_embeddings_batched(model, batch_obj)
-        final_embeddings = [e[-1] for e in embeddings_list]
+        final_logits = []
+        for start in range(0, len(graphs), self.graph_batch_size):
+            group_graphs = graphs[start : start + self.graph_batch_size]
+            n_graphs = len(group_graphs)
+            logger.debug(f'fitting autoregressive explanation module for graphs {start}:{start+n_graphs}')
 
-        n_graphs = len(graphs)
-        device = final_embeddings[0].device
-        dtype = final_embeddings[0].dtype
+            batch_obj = Batch.from_data_list(group_graphs).to(DEVICE)
+            logits, embeddings_list = get_model_embeddings_batched(model, batch_obj)
+            final_embeddings = [e[-1] for e in embeddings_list]
 
-        shuffled_list, inv_perms, edge_counts = [], [], []
-        for graph_idx, (G, fe) in enumerate(zip(graphs, final_embeddings)):
-            src, dst = G.edge_index
-            edge_embeddings = torch.cat([fe[src], fe[dst]], dim=-1)
-            n_edges = edge_embeddings.shape[0]
-            edge_counts.append(n_edges)
+            device = final_embeddings[0].device
+            dtype = final_embeddings[0].dtype
 
-            perm = self._get_perm(graph_idx, n_edges, device)
-            inv_perms.append(torch.argsort(perm))
-            shuffled_list.append(edge_embeddings[perm])
+            edge_counts = []
+            permutations = []
+            inv_perms = []
+            shuffled_node_embeddings = []
+            for G, fe in zip(group_graphs, final_embeddings):
+                src, dst = G.edge_index
+                edge_embeddings = torch.cat([fe[src], fe[dst]], dim=-1)
+                n_edges = edge_embeddings.shape[0]
+                edge_counts.append(n_edges)
 
-        max_edges = max(edge_counts)
-        edge_dim = shuffled_list[0].shape[-1]
+                perm = torch.randperm(n_edges, device=device)
+                permutations.append(perm)
+                inv_perms.append(torch.argsort(perm))
+                shuffled_node_embeddings.append(edge_embeddings[perm])
 
-        # (n_graphs, max_edges, 2*embedding_size), zero-padded past each graph's n_edges
-        padded = torch.zeros(n_graphs, max_edges, edge_dim, device=device, dtype=dtype)
-        for i, s in enumerate(shuffled_list):
-            padded[i, : s.shape[0]] = s
+            max_edges = max(edge_counts)
+            edge_dim = shuffled_node_embeddings[0].shape[-1]
 
-        caches = [layer.init_cache(n_graphs, max_edges, device, dtype) for layer in self.layers]
-        m_prev = torch.zeros(n_graphs, 1, device=device, dtype=dtype)
-        all_step_logits = torch.zeros(n_graphs, max_edges, self.output_size, device=device, dtype=dtype)
+            padded = torch.zeros(n_graphs, max_edges, edge_dim, device=device, dtype=dtype)
+            for i, s in enumerate(shuffled_node_embeddings):
+                padded[i, : s.shape[0]] = s
 
-        for i in range(max_edges):
-            x_in = torch.cat([padded[:, i, :], m_prev], dim=-1)   # (n_graphs, 2E+1)
-            x = self.input_proj(x_in).unsqueeze(1)                # (n_graphs, 1, hidden)
+            all_step_logits = self._run_autoregressive(padded, device, dtype)
 
-            for layer_idx, layer in enumerate(self.layers):
-                x, caches[layer_idx] = layer.step(x, caches[layer_idx], t=i)
+            for i in range(n_graphs):
+                n_edges = edge_counts[i]
+                final_logits.append(all_step_logits[i, :n_edges][inv_perms[i]])
 
-            logit_i = self.output_head(x.squeeze(1))              # (n_graphs, output_size)
-            all_step_logits[:, i, :] = logit_i
-            m_prev = torch.sigmoid(logit_i).mean(dim=-1, keepdim=True)  # (n_graphs, 1)
-
-        all_logits = []
-        for i in range(n_graphs):
-            n_edges = edge_counts[i]
-            logits_i = all_step_logits[i, :n_edges]     # drop padded steps
-            all_logits.append(logits_i[inv_perms[i]])   # back to edge_index order
-
-        return all_logits
+        return final_logits
 
 
 class PGEExplanationModule(CustomExplainerModule):
